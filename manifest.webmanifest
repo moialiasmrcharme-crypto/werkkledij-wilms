@@ -1,9 +1,9 @@
 {
-  "name": "Werkkledijportaal",
+  "name": "Werkkledij Wilms",
   "short_name": "Werkkledij",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f1f5f9",
+  "background_color": "#f8fafc",
   "theme_color": "#0f172a",
   "icons": []
 }
