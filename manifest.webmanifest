@@ -1,0 +1,9 @@
+{
+  "name": "Werkkledijportaal",
+  "short_name": "Werkkledij",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f1f5f9",
+  "theme_color": "#0f172a",
+  "icons": []
+}
