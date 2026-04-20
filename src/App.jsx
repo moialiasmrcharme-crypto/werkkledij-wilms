@@ -373,7 +373,20 @@ function AdminView({ employees, catalogItems, importMeta, importError, onImport,
 }
 
 export default function App() {
-  useEffect(() => {
+useEffect(() => {
+  async function testSupabase() {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("*");
+
+    console.log("SUPABASE DATA:", data);
+    console.log("SUPABASE ERROR:", error);
+  }
+
+  testSupabase();
+}, []);
+
+useEffect(() => {
   async function loadEmployees() {
     const { data, error } = await supabase
       .from("employees")
@@ -399,6 +412,12 @@ export default function App() {
       importedRemaining: null,
       orders: []
     }));
+
+    setEmployees(mapped);
+  }
+
+  loadEmployees();
+}, []);  
 
     setEmployees(mapped);
   }
