@@ -374,6 +374,37 @@ function AdminView({ employees, catalogItems, importMeta, importError, onImport,
 
 export default function App() {
   useEffect(() => {
+  async function loadEmployees() {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.log("LOAD EMPLOYEES ERROR:", error);
+      return;
+    }
+
+    const mapped = (data || []).map((row) => ({
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      fullName: row.full_name,
+      email: row.email,
+      status: row.status,
+      active: row.active,
+      basePoints: row.status === "Arbeider" ? 300 : 40,
+      extraPoints: row.extra_points || 0,
+      importedSpent: null,
+      importedRemaining: null,
+      orders: []
+    }));
+
+    setEmployees(mapped);
+  }
+
+  loadEmployees();
+}, []);
     async function testSupabase() {
       const { data, error } = await supabase.from("employees").select("*");
       console.log("SUPABASE DATA:", data);
@@ -383,7 +414,7 @@ export default function App() {
   }, []);
 
   const s = styles();
-  const [employees, setEmployees] = useState(initialEmployees);
+  const [employees, setEmployees] = useState([]);
   const [catalogItems, setCatalogItems] = useState(initialCatalog);
   const [importMeta, setImportMeta] = useState(null);
   const [importError, setImportError] = useState("");
