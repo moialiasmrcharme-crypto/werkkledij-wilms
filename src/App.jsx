@@ -421,7 +421,7 @@ export default function App() {
 
     loadEmployees();
   }, []);
-  const [employees, setEmployees] = useState([]);
+
   const [catalogItems, setCatalogItems] = useState(initialCatalog);
   const [importMeta, setImportMeta] = useState(null);
   const [importError, setImportError] = useState("");
