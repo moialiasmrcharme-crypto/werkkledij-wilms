@@ -188,7 +188,7 @@ function styles() {
 
 function LoginScreen({ employees, onLogin }) {
   const s = styles();
-  const [role, setRole] = useState("employee");
+  const [role, setRole] = useState("admin");
   const [employeeId, setEmployeeId] = useState(String(employees[0]?.id || "1"));
 
   return (
@@ -212,20 +212,10 @@ function LoginScreen({ employees, onLogin }) {
             <div style={{ marginBottom: 12 }}>
               <label style={s.small}>Rol</label>
               <select style={s.input} value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="employee">Werknemer</option>
-                <option value="admin">Beheerder</option>
-              </select>
+  <option value="admin">Beheerder</option>
+</select>
             </div>
-            {role === "employee" && (
-              <div style={{ marginBottom: 12 }}>
-                <label style={s.small}>Werknemer</label>
-                <select style={s.input} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-                  {employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>{employee.fullName}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            
             <button style={{ ...s.button, width: "100%" }} onClick={() => onLogin(role, employeeId)}>Open app</button>
             <p style={{ ...s.small, marginTop: 12 }}>Demo-login zonder wachtwoord. In de echte versie voeg je bedrijfslogin toe.</p>
           </div>
@@ -571,7 +561,7 @@ useEffect(() => {
   const [session, setSession] = useState(null);
 
   const enrichedEmployees = useMemo(() => employees.map(calcEmployee), [employees]);
-  const selectedEmployee = enrichedEmployees.find((employee) => String(employee.id) === String(session?.employeeId)) || enrichedEmployees[0];
+  
 
   function handleImport(parsed, fileName, errorMessage = "") {
     if (errorMessage) {
@@ -625,31 +615,22 @@ useEffect(() => {
   }
 
   if (!session) {
-    return <LoginScreen employees={enrichedEmployees} onLogin={(role, employeeId) => setSession({ role, employeeId })} />;
-  }
+  return <LoginScreen employees={enrichedEmployees} onLogin={(role, employeeId) => setSession({ role, employeeId })} />;
+}
 
-  return (
-    <div style={s.page}>
-      <div style={s.container}>
-        {session.role === "admin" ? (
-          <AdminView
-            employees={employees}
-            onAddExtraPoints={addExtraPoints}
-            onUpdateOrderStatus={updateOrderStatus}
-            importMeta={importMeta}
-            onImport={handleImport}
-            importError={importError}
-            onLogout={() => setSession(null)}
-          />
-        ) : (
-          <EmployeeView
-            employee={selectedEmployee}
-            onCreateOrder={createOrder}
-            importMeta={importMeta}
-            onLogout={() => setSession(null)}
-          />
-        )}
-      </div>
+return (
+  <div style={s.page}>
+    <div style={s.container}>
+      <AdminView
+        employees={employees}
+        onAddExtraPoints={addExtraPoints}
+        onUpdateOrderStatus={updateOrderStatus}
+        importMeta={importMeta}
+        onImport={handleImport}
+        importError={importError}
+        onLogout={() => setSession(null)}
+      />
     </div>
-  );
+  </div>
+);
 }
