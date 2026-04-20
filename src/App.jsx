@@ -1,5 +1,6 @@
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "./lib/supabase";
 import * as XLSX from "xlsx";
 
 const catalog = [
@@ -551,6 +552,18 @@ function AdminView({ employees, onAddExtraPoints, onUpdateOrderStatus, importMet
 }
 
 export default function App() {
+useEffect(() => {
+  async function testSupabase() {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("*");
+
+    console.log("SUPABASE DATA:", data);
+    console.log("SUPABASE ERROR:", error);
+  }
+
+  testSupabase();
+}, []);  
   const s = styles();
   const [employees, setEmployees] = useState(initialEmployees);
   const [importMeta, setImportMeta] = useState(null);
