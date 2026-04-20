@@ -1,7 +1,7 @@
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
-import * as XLSX from "xlsx";
+//import * as XLSX from "xlsx";
 
 const catalog = [
   { id: 1, name: "Blauwe vest", points: 40, excelHeader: "Blauwe vest - 40" },
