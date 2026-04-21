@@ -581,12 +581,7 @@ export default function App() {
     )
   );
 }
-    if (!cart || cart.length === 0) return;
-    setEmployees((current) => current.map((employee) => employee.id === employeeId ? {
-      ...employee,
-      orders: [{ id: Date.now(), date: new Date().toISOString().slice(0, 10), status: "Besteld", items: cart }, ...(employee.orders || [])]
-    } : employee));
-  }
+    
 
   async function onAddCatalogItem(name, points) {
   if (!name) return;
