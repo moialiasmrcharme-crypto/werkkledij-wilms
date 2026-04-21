@@ -607,8 +607,9 @@ export default function App() {
       points: row.points,
       active: row.active,
       excelHeader: row.name
+    }
   ]);
-} 
+}
   return (
     <div style={s.page}>
       <div style={s.container}>
