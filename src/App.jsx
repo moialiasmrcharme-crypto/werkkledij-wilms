@@ -422,7 +422,33 @@ export default function App() {
     loadEmployees();
   }, []);
 
-  const [catalogItems, setCatalogItems] = useState(initialCatalog);
+  useEffect(() => {
+  async function loadCatalog() {
+    const { data, error } = await supabase
+      .from("catalog_items")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.log("LOAD CATALOG ERROR:", error);
+      return;
+    }
+
+    const mapped = (data || []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      points: row.points,
+      active: row.active,
+      excelHeader: row.name
+    }));
+
+    setCatalogItems(mapped);
+  }
+
+  loadCatalog();
+}, []);
+
+  const [catalogItems, setCatalogItems] = useState([]);
   const [importMeta, setImportMeta] = useState(null);
   const [importError, setImportError] = useState("");
 
@@ -437,7 +463,50 @@ export default function App() {
     }
   }
 
-  function onAddEmployee(firstName, lastName, status) {
+  async function onAddEmployee(firstName, lastName, status) {
+  if (!firstName || !lastName) return;
+
+  const payload = {
+    first_name: firstName,
+    last_name: lastName,
+    full_name: `${lastName} ${firstName}`.trim(),
+    email: "",
+    status,
+    active: true,
+    extra_points: 0
+  };
+
+  const { data, error } = await supabase
+    .from("employees")
+    .insert([payload])
+    .select();
+
+  if (error) {
+    console.log("ADD EMPLOYEE ERROR:", error);
+    return;
+  }
+
+  const row = data?.[0];
+  if (!row) return;
+
+  setEmployees((current) => [
+    ...current,
+    {
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      fullName: row.full_name,
+      email: row.email,
+      status: row.status,
+      active: row.active,
+      basePoints: row.status === "Arbeider" ? 300 : 40,
+      extraPoints: row.extra_points || 0,
+      importedSpent: null,
+      importedRemaining: null,
+      orders: []
+    }
+  ]);
+}
     if (!firstName || !lastName) return;
     setEmployees((current) => [...current, {
       id: Date.now(),
@@ -456,7 +525,62 @@ export default function App() {
     setEmployees((current) => current.map((employee) => employee.id === employeeId ? { ...employee, extraPoints: (employee.extraPoints || 0) + points } : employee));
   }
 
-  function onSaveOrder(employeeId, cart) {
+  async function onSaveOrder(employeeId, cart) {
+  if (!cart || cart.length === 0) return;
+
+  const { data: orderData, error: orderError } = await supabase
+    .from("orders")
+    .insert([{
+      employee_id: employeeId,
+      order_date: new Date().toISOString().slice(0, 10),
+      status: "Besteld",
+      note: ""
+    }])
+    .select();
+
+  if (orderError) {
+    console.log("CREATE ORDER ERROR:", orderError);
+    return;
+  }
+
+  const order = orderData?.[0];
+  if (!order) return;
+
+  const lines = cart.map((line) => ({
+    order_id: order.id,
+    item_id: line.itemId,
+    qty: line.qty,
+    points_per_unit: line.pointsPerUnit
+  }));
+
+  const { error: lineError } = await supabase
+    .from("order_lines")
+    .insert(lines);
+
+  if (lineError) {
+    console.log("CREATE ORDER LINES ERROR:", lineError);
+    return;
+  }
+
+  setEmployees((current) =>
+    current.map((employee) =>
+      employee.id === employeeId
+        ? {
+            ...employee,
+            orders: [
+              {
+                id: order.id,
+                date: order.order_date,
+                status: order.status,
+                items: cart
+              },
+              ...(employee.orders || [])
+            ]
+          }
+        : employee
+    )
+  );
+}
     if (!cart || cart.length === 0) return;
     setEmployees((current) => current.map((employee) => employee.id === employeeId ? {
       ...employee,
@@ -464,7 +588,33 @@ export default function App() {
     } : employee));
   }
 
-  function onAddCatalogItem(name, points) {
+  async function onAddCatalogItem(name, points) {
+  if (!name) return;
+
+  const { data, error } = await supabase
+    .from("catalog_items")
+    .insert([{ name, points, active: true }])
+    .select();
+
+  if (error) {
+    console.log("ADD CATALOG ITEM ERROR:", error);
+    return;
+  }
+
+  const row = data?.[0];
+  if (!row) return;
+
+  setCatalogItems((current) => [
+    ...current,
+    {
+      id: row.id,
+      name: row.name,
+      points: row.points,
+      active: row.active,
+      excelHeader: row.name
+    }
+  ]);
+}
     if (!name) return;
     setCatalogItems((current) => [...current, { id: Date.now(), name, points, active: true, excelHeader: name }]);
   }
