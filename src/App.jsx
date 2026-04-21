@@ -607,7 +607,6 @@ export default function App() {
       points: row.points,
       active: row.active,
       excelHeader: row.name
-    }
   ]);
 } 
   return (
