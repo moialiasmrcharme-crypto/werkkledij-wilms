@@ -583,7 +583,7 @@ export default function App() {
 }
     
 
-  async function onAddCatalogItem(name, points) {
+ async function onAddCatalogItem(name, points) {
   if (!name) return;
 
   const { data, error } = await supabase
@@ -609,11 +609,7 @@ export default function App() {
       excelHeader: row.name
     }
   ]);
-}
-    if (!name) return;
-    setCatalogItems((current) => [...current, { id: Date.now(), name, points, active: true, excelHeader: name }]);
-  }
-
+} 
   return (
     <div style={s.page}>
       <div style={s.container}>
