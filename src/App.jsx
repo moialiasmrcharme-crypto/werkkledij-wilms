@@ -24,10 +24,9 @@ export default function App() {
   const [newItemPoints, setNewItemPoints] = useState("");
   const [savingItem, setSavingItem] = useState(false);
 
-  const activeEmployees = useMemo(
-    () => employees.filter((employee) => employee.active),
-    [employees]
-  );
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [activeFilter, setActiveFilter] = useState("active");
 
   const activeCatalogItems = useMemo(
     () => catalogItems.filter((item) => item.active),
@@ -39,6 +38,7 @@ export default function App() {
       const basePoints = employee.status === "Arbeider" ? 300 : 40;
       const extraPoints = employee.extra_points || 0;
       const budget = Math.min(500, basePoints + extraPoints);
+
       const orders = ordersByEmployee[employee.id] || [];
       const spent = orders.reduce((sum, order) => {
         return (
@@ -49,6 +49,7 @@ export default function App() {
           )
         );
       }, 0);
+
       return {
         ...employee,
         budget,
@@ -57,6 +58,35 @@ export default function App() {
       };
     });
   }, [employees, ordersByEmployee]);
+
+  const filteredEmployees = useMemo(() => {
+    let result = [...employeesWithStats];
+
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase().trim();
+      result = result.filter((employee) =>
+        (employee.full_name || "")
+          .toLowerCase()
+          .includes(search)
+      );
+    }
+
+    if (statusFilter !== "all") {
+      result = result.filter((employee) => employee.status === statusFilter);
+    }
+
+    if (activeFilter === "active") {
+      result = result.filter((employee) => employee.active);
+    } else if (activeFilter === "inactive") {
+      result = result.filter((employee) => !employee.active);
+    }
+
+    result.sort((a, b) =>
+      (a.full_name || "").localeCompare(b.full_name || "", "nl-BE")
+    );
+
+    return result;
+  }, [employeesWithStats, searchTerm, statusFilter, activeFilter]);
 
   async function loadEmployees() {
     setLoadingEmployees(true);
@@ -431,7 +461,7 @@ export default function App() {
                 .filter((employee) => employee.active)
                 .map((employee) => (
                   <option key={employee.id} value={employee.id}>
-                    {employee.full_name || employee.fullName} ({employee.remaining} pt)
+                    {employee.full_name} ({employee.remaining} pt)
                   </option>
                 ))}
             </select>
@@ -531,10 +561,84 @@ export default function App() {
         </div>
       </div>
 
+      <div
+        style={{
+          border: "1px solid #ddd",
+          borderRadius: 12,
+          padding: 16,
+          marginBottom: 24,
+          background: "#f8fafc",
+        }}
+      >
+        <h2 style={{ marginTop: 0 }}>Zoek en filter werknemers</h2>
+
+        <div
+          style={{
+            display: "grid",
+            gap: 12,
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          }}
+        >
+          <div>
+            <label>Zoek op naam</label>
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="bv. Meeus of Janssens"
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
+            />
+          </div>
+
+          <div>
+            <label>Filter op statuut</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
+            >
+              <option value="all">Alle statuten</option>
+              <option value="Arbeider">Arbeider</option>
+              <option value="Bediende">Bediende</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Filter op status</label>
+            <select
+              value={activeFilter}
+              onChange={(e) => setActiveFilter(e.target.value)}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
+            >
+              <option value="active">Alleen actief</option>
+              <option value="inactive">Alleen inactief</option>
+              <option value="all">Alles</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       <h2>Werknemers</h2>
       {loadingEmployees ? <div>Werknemers laden...</div> : null}
+      <div style={{ marginBottom: 12 }}>
+        {filteredEmployees.length} werknemer(s) gevonden
+      </div>
 
-      {employeesWithStats.map((employee) => (
+      {filteredEmployees.map((employee) => (
         <div
           key={employee.id}
           style={{
@@ -547,9 +651,9 @@ export default function App() {
           }}
         >
           <div>
-            <strong>{employee.full_name || employee.fullName}</strong> (
-            {employee.status}) - budget {employee.budget} / verbruikt{" "}
-            {employee.spent} / saldo {employee.remaining}
+            <strong>{employee.full_name}</strong> ({employee.status}) - budget{" "}
+            {employee.budget} / verbruikt {employee.spent} / saldo{" "}
+            {employee.remaining}
             {!employee.active && <span> - inactief</span>}
           </div>
 
@@ -586,9 +690,7 @@ export default function App() {
               background: "#fff",
             }}
           >
-            <h3 style={{ marginTop: 0 }}>
-              {employee.full_name || employee.fullName}
-            </h3>
+            <h3 style={{ marginTop: 0 }}>{employee.full_name}</h3>
 
             {employeeOrders.map((order) => (
               <div
