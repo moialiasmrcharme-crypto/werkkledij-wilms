@@ -34,6 +34,14 @@ export default function App() {
   const [extraPointsInput, setExtraPointsInput] = useState("");
   const [savingExtraPoints, setSavingExtraPoints] = useState(false);
 
+  const ORDER_STATUSES = [
+    "In aanvraag",
+    "Goedgekeurd",
+    "Besteld",
+    "Geleverd",
+    "Geannuleerd",
+  ];
+
   const activeCatalogItems = useMemo(
     () => catalogItems.filter((item) => item.active),
     [catalogItems]
@@ -47,6 +55,7 @@ export default function App() {
 
       const orders = ordersByEmployee[employee.id] || [];
       const newSpent = orders.reduce((sum, order) => {
+        if (order.status === "Geannuleerd") return sum;
         return (
           sum +
           (order.lines || []).reduce(
@@ -399,7 +408,7 @@ export default function App() {
         {
           employee_id: Number(selectedEmployeeId),
           order_date: new Date().toISOString().slice(0, 10),
-          status: "Besteld",
+          status: "In aanvraag",
           note: "",
         },
       ])
@@ -459,6 +468,31 @@ export default function App() {
     setOrderCart([]);
   }
 
+  async function onUpdateOrderStatus(orderId, employeeId, nextStatus) {
+    setErrorMessage("");
+
+    const { error } = await supabase
+      .from("orders")
+      .update({ status: nextStatus })
+      .eq("id", orderId);
+
+    if (error) {
+      console.log("UPDATE ORDER STATUS ERROR:", error);
+      setErrorMessage("Bestelstatus kon niet aangepast worden.");
+      return;
+    }
+
+    setOrdersByEmployee((prev) => {
+      const currentOrders = prev[employeeId] || [];
+      return {
+        ...prev,
+        [employeeId]: currentOrders.map((order) =>
+          order.id === orderId ? { ...order, status: nextStatus } : order
+        ),
+      };
+    });
+  }
+
   function getItemName(itemId) {
     const item = catalogItems.find((catalogItem) => catalogItem.id === itemId);
     return item ? item.name : `Artikel ${itemId}`;
@@ -480,6 +514,23 @@ export default function App() {
       width: "100%",
       padding: 10,
       marginTop: 4,
+    };
+  }
+
+  function statusStyle(orderStatus) {
+    const map = {
+      "In aanvraag": { background: "#dbeafe", color: "#1d4ed8" },
+      "Goedgekeurd": { background: "#dcfce7", color: "#166534" },
+      "Besteld": { background: "#fef3c7", color: "#92400e" },
+      "Geleverd": { background: "#e9d5ff", color: "#6b21a8" },
+      "Geannuleerd": { background: "#fee2e2", color: "#991b1b" },
+    };
+    return {
+      display: "inline-block",
+      padding: "4px 10px",
+      borderRadius: 999,
+      fontSize: 12,
+      ...(map[orderStatus] || { background: "#e5e7eb", color: "#111827" }),
     };
   }
 
@@ -841,7 +892,7 @@ export default function App() {
             </div>
           </div>
 
-          <h3>Nieuwe bestellingen</h3>
+          <h3>Bestellingen</h3>
           {(ordersByEmployee[selectedEmployee.id] || []).length === 0 ? (
             <div>Geen nieuwe bestellingen voor deze werknemer.</div>
           ) : (
@@ -852,14 +903,31 @@ export default function App() {
                   borderTop: "1px solid #eee",
                   paddingTop: 10,
                   marginTop: 10,
+                  opacity: order.status === "Geannuleerd" ? 0.6 : 1,
                 }}
               >
-                <div>
+                <div style={{ marginBottom: 6 }}>
                   <strong>Datum:</strong> {order.order_date}
                 </div>
-                <div>
-                  <strong>Status:</strong> {order.status}
+                <div style={{ marginBottom: 6 }}>
+                  <strong>Status:</strong>{" "}
+                  <span style={statusStyle(order.status)}>{order.status}</span>
                 </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  {ORDER_STATUSES.map((nextStatus) => (
+                    <button
+                      key={nextStatus}
+                      onClick={() =>
+                        onUpdateOrderStatus(order.id, selectedEmployee.id, nextStatus)
+                      }
+                      disabled={order.status === nextStatus}
+                    >
+                      {nextStatus}
+                    </button>
+                  ))}
+                </div>
+
                 <ul>
                   {(order.lines || []).map((line) => (
                     <li key={line.id}>
@@ -900,7 +968,7 @@ export default function App() {
       </div>
 
       <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Nieuwe bestellingen per werknemer</h2>
+        <h2 style={{ marginTop: 0 }}>Bestellingen per werknemer</h2>
         {loadingOrders ? <div>Bestellingen laden...</div> : null}
 
         {employeesWithStats.map((employee) => {
@@ -927,14 +995,31 @@ export default function App() {
                     borderTop: "1px solid #eee",
                     paddingTop: 10,
                     marginTop: 10,
+                    opacity: order.status === "Geannuleerd" ? 0.6 : 1,
                   }}
                 >
-                  <div>
+                  <div style={{ marginBottom: 6 }}>
                     <strong>Datum:</strong> {order.order_date}
                   </div>
-                  <div>
-                    <strong>Status:</strong> {order.status}
+                  <div style={{ marginBottom: 6 }}>
+                    <strong>Status:</strong>{" "}
+                    <span style={statusStyle(order.status)}>{order.status}</span>
                   </div>
+
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                    {ORDER_STATUSES.map((nextStatus) => (
+                      <button
+                        key={nextStatus}
+                        onClick={() =>
+                          onUpdateOrderStatus(order.id, employee.id, nextStatus)
+                        }
+                        disabled={order.status === nextStatus}
+                      >
+                        {nextStatus}
+                      </button>
+                    ))}
+                  </div>
+
                   <ul>
                     {(order.lines || []).map((line) => (
                       <li key={line.id}>
