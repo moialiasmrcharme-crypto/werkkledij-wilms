@@ -331,6 +331,31 @@ export default function App() {
     setNewItemPoints("");
   }
 
+  async function onToggleCatalogItem(item) {
+    setErrorMessage("");
+
+    const nextActive = !item.active;
+
+    const { error } = await supabase
+      .from("catalog_items")
+      .update({ active: nextActive })
+      .eq("id", item.id);
+
+    if (error) {
+      console.log("TOGGLE CATALOG ITEM ERROR:", error);
+      setErrorMessage("Artikelstatus kon niet aangepast worden.");
+      return;
+    }
+
+    setCatalogItems((prev) =>
+      prev.map((catalogItem) =>
+        catalogItem.id === item.id
+          ? { ...catalogItem, active: nextActive }
+          : catalogItem
+      )
+    );
+  }
+
   function onAddLineToCart() {
     if (!selectedItemId || qty <= 0) return;
 
@@ -600,7 +625,7 @@ export default function App() {
             />
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={onAddLineToCart}>Artikel toevoegen aan bestelling</button>
             <button
               onClick={onCreateOrder}
@@ -846,8 +871,23 @@ export default function App() {
         <h2 style={{ marginTop: 0 }}>Catalogus</h2>
         {loadingCatalog ? <div>Catalogus laden...</div> : null}
         {catalogItems.map((item) => (
-          <div key={item.id}>
-            {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
+          <div
+            key={item.id}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "8px 0",
+              borderBottom: "1px solid #eee",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
+            </div>
+            <button onClick={() => onToggleCatalogItem(item)}>
+              {item.active ? "Inactief zetten" : "Activeren"}
+            </button>
           </div>
         ))}
       </div>
