@@ -1,9 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
 
 export default function App() {
   const [employees, setEmployees] = useState([]);
   const [catalogItems, setCatalogItems] = useState([]);
+  const [ordersByEmployee, setOrdersByEmployee] = useState({});
+
+  const [loadingEmployees, setLoadingEmployees] = useState(true);
+  const [loadingCatalog, setLoadingCatalog] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -13,47 +18,134 @@ export default function App() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [selectedItemId, setSelectedItemId] = useState("");
   const [qty, setQty] = useState(1);
+  const [savingOrder, setSavingOrder] = useState(false);
 
   const [newItemName, setNewItemName] = useState("");
   const [newItemPoints, setNewItemPoints] = useState("");
+  const [savingItem, setSavingItem] = useState(false);
+
+  const activeEmployees = useMemo(
+    () => employees.filter((employee) => employee.active),
+    [employees]
+  );
+
+  const activeCatalogItems = useMemo(
+    () => catalogItems.filter((item) => item.active),
+    [catalogItems]
+  );
+
+  const employeesWithStats = useMemo(() => {
+    return employees.map((employee) => {
+      const basePoints = employee.status === "Arbeider" ? 300 : 40;
+      const extraPoints = employee.extra_points || 0;
+      const budget = Math.min(500, basePoints + extraPoints);
+      const orders = ordersByEmployee[employee.id] || [];
+      const spent = orders.reduce((sum, order) => {
+        return (
+          sum +
+          order.lines.reduce(
+            (lineSum, line) => lineSum + line.qty * line.points_per_unit,
+            0
+          )
+        );
+      }, 0);
+      return {
+        ...employee,
+        budget,
+        spent,
+        remaining: budget - spent,
+      };
+    });
+  }, [employees, ordersByEmployee]);
+
+  async function loadEmployees() {
+    setLoadingEmployees(true);
+    setErrorMessage("");
+
+    const { data, error } = await supabase
+      .from("employees")
+      .select("*")
+      .order("id", { ascending: true });
+
+    setLoadingEmployees(false);
+
+    if (error) {
+      console.log("LOAD EMPLOYEES ERROR:", error);
+      setErrorMessage("Werknemers konden niet geladen worden.");
+      return;
+    }
+
+    setEmployees(data || []);
+  }
+
+  async function loadCatalog() {
+    setLoadingCatalog(true);
+    setErrorMessage("");
+
+    const { data, error } = await supabase
+      .from("catalog_items")
+      .select("*")
+      .order("id", { ascending: true });
+
+    setLoadingCatalog(false);
+
+    if (error) {
+      console.log("LOAD CATALOG ERROR:", error);
+      setErrorMessage("Catalogus kon niet geladen worden.");
+      return;
+    }
+
+    setCatalogItems(data || []);
+  }
+
+  async function loadOrdersAndLines() {
+    const { data: orders, error: ordersError } = await supabase
+      .from("orders")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (ordersError) {
+      console.log("LOAD ORDERS ERROR:", ordersError);
+      setErrorMessage("Bestellingen konden niet geladen worden.");
+      return;
+    }
+
+    const { data: lines, error: linesError } = await supabase
+      .from("order_lines")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (linesError) {
+      console.log("LOAD ORDER LINES ERROR:", linesError);
+      setErrorMessage("Bestellijnen konden niet geladen worden.");
+      return;
+    }
+
+    const grouped = {};
+    (orders || []).forEach((order) => {
+      const employeeId = order.employee_id;
+      if (!grouped[employeeId]) grouped[employeeId] = [];
+      grouped[employeeId].push({
+        ...order,
+        lines: (lines || []).filter((line) => line.order_id === order.id),
+      });
+    });
+
+    setOrdersByEmployee(grouped);
+  }
 
   useEffect(() => {
-    async function loadEmployees() {
-      const { data, error } = await supabase
-        .from("employees")
-        .select("*")
-        .order("id", { ascending: true });
-
-      if (error) {
-        console.log("LOAD EMPLOYEES ERROR:", error);
-        return;
-      }
-
-      setEmployees(data || []);
+    async function init() {
+      await Promise.all([loadEmployees(), loadCatalog(), loadOrdersAndLines()]);
     }
-
-    async function loadCatalog() {
-      const { data, error } = await supabase
-        .from("catalog_items")
-        .select("*")
-        .order("id", { ascending: true });
-
-      if (error) {
-        console.log("LOAD CATALOG ERROR:", error);
-        return;
-      }
-
-      setCatalogItems(data || []);
-    }
-
-    loadEmployees();
-    loadCatalog();
+    init();
   }, []);
 
   async function onAddEmployee() {
     if (!firstName.trim() || !lastName.trim()) return;
 
     setSavingEmployee(true);
+    setErrorMessage("");
 
     const payload = {
       first_name: firstName.trim(),
@@ -74,16 +166,19 @@ export default function App() {
 
     if (error) {
       console.log("ADD EMPLOYEE ERROR:", error);
+      setErrorMessage("Werknemer kon niet toegevoegd worden.");
       return;
     }
 
-    setEmployees((prev) => [...prev, data[0]]);
+    setEmployees((prev) => [...prev, ...(data || [])]);
     setFirstName("");
     setLastName("");
     setStatus("Arbeider");
   }
 
   async function onDeactivateEmployee(id) {
+    setErrorMessage("");
+
     const { error } = await supabase
       .from("employees")
       .update({ active: false })
@@ -91,16 +186,22 @@ export default function App() {
 
     if (error) {
       console.log("DEACTIVATE EMPLOYEE ERROR:", error);
+      setErrorMessage("Werknemer kon niet inactief gezet worden.");
       return;
     }
 
     setEmployees((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, active: false } : e))
+      prev.map((employee) =>
+        employee.id === id ? { ...employee, active: false } : employee
+      )
     );
   }
 
   async function onAddCatalogItem() {
     if (!newItemName.trim()) return;
+
+    setSavingItem(true);
+    setErrorMessage("");
 
     const payload = {
       name: newItemName.trim(),
@@ -113,12 +214,15 @@ export default function App() {
       .insert([payload])
       .select();
 
+    setSavingItem(false);
+
     if (error) {
       console.log("ADD CATALOG ITEM ERROR:", error);
+      setErrorMessage("Artikel kon niet toegevoegd worden.");
       return;
     }
 
-    setCatalogItems((prev) => [...prev, data[0]]);
+    setCatalogItems((prev) => [...prev, ...(data || [])]);
     setNewItemName("");
     setNewItemPoints("");
   }
@@ -126,10 +230,17 @@ export default function App() {
   async function onCreateOrder() {
     if (!selectedEmployeeId || !selectedItemId || qty <= 0) return;
 
+    setSavingOrder(true);
+    setErrorMessage("");
+
     const item = catalogItems.find(
-      (c) => String(c.id) === String(selectedItemId)
+      (catalogItem) => String(catalogItem.id) === String(selectedItemId)
     );
-    if (!item) return;
+
+    if (!item) {
+      setSavingOrder(false);
+      return;
+    }
 
     const { data: orderData, error: orderError } = await supabase
       .from("orders")
@@ -145,31 +256,60 @@ export default function App() {
 
     if (orderError) {
       console.log("CREATE ORDER ERROR:", orderError);
+      setSavingOrder(false);
+      setErrorMessage("Bestelling kon niet opgeslagen worden.");
       return;
     }
 
-    const order = orderData[0];
+    const order = orderData?.[0];
+    if (!order) {
+      setSavingOrder(false);
+      return;
+    }
 
-    const { error: lineError } = await supabase
+    const { data: lineData, error: lineError } = await supabase
       .from("order_lines")
       .insert([
         {
           order_id: order.id,
           item_id: item.id,
-          qty: qty,
+          qty: Number(qty),
           points_per_unit: item.points,
         },
-      ]);
+      ])
+      .select();
+
+    setSavingOrder(false);
 
     if (lineError) {
       console.log("CREATE ORDER LINE ERROR:", lineError);
+      setErrorMessage("Bestellijn kon niet opgeslagen worden.");
       return;
     }
 
-    alert("Bestelling opgeslagen");
+    setOrdersByEmployee((prev) => {
+      const employeeId = Number(selectedEmployeeId);
+      const currentOrders = prev[employeeId] || [];
+      return {
+        ...prev,
+        [employeeId]: [
+          {
+            ...order,
+            lines: lineData || [],
+          },
+          ...currentOrders,
+        ],
+      };
+    });
+
     setSelectedEmployeeId("");
     setSelectedItemId("");
     setQty(1);
+  }
+
+  function getItemName(itemId) {
+    const item = catalogItems.find((catalogItem) => catalogItem.id === itemId);
+    return item ? item.name : `Artikel ${itemId}`;
   }
 
   return (
@@ -177,11 +317,25 @@ export default function App() {
       style={{
         padding: 20,
         fontFamily: "Arial, sans-serif",
-        maxWidth: 1000,
+        maxWidth: 1100,
         margin: "0 auto",
       }}
     >
       <h1>Werkkledij Wilms (Admin)</h1>
+
+      {errorMessage ? (
+        <div
+          style={{
+            background: "#fee2e2",
+            color: "#991b1b",
+            padding: 12,
+            borderRadius: 8,
+            marginBottom: 20,
+          }}
+        >
+          {errorMessage}
+        </div>
+      ) : null}
 
       <div
         style={{
@@ -200,7 +354,12 @@ export default function App() {
             <input
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
-              style={{ display: "block", width: "100%", padding: 10, marginTop: 4 }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
             />
           </div>
 
@@ -209,7 +368,12 @@ export default function App() {
             <input
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
-              style={{ display: "block", width: "100%", padding: 10, marginTop: 4 }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
             />
           </div>
 
@@ -218,7 +382,12 @@ export default function App() {
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
-              style={{ display: "block", width: "100%", padding: 10, marginTop: 4 }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
             >
               <option value="Arbeider">Arbeider</option>
               <option value="Bediende">Bediende</option>
@@ -250,14 +419,19 @@ export default function App() {
             <select
               value={selectedEmployeeId}
               onChange={(e) => setSelectedEmployeeId(e.target.value)}
-              style={{ display: "block", width: "100%", padding: 10, marginTop: 4 }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
             >
               <option value="">Kies werknemer</option>
-              {employees
-                .filter((e) => e.active)
-                .map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.full_name}
+              {employeesWithStats
+                .filter((employee) => employee.active)
+                .map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employee.full_name || employee.fullName} ({employee.remaining} pt)
                   </option>
                 ))}
             </select>
@@ -268,16 +442,19 @@ export default function App() {
             <select
               value={selectedItemId}
               onChange={(e) => setSelectedItemId(e.target.value)}
-              style={{ display: "block", width: "100%", padding: 10, marginTop: 4 }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
             >
               <option value="">Kies artikel</option>
-              {catalogItems
-                .filter((c) => c.active)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.points} pt)
-                  </option>
-                ))}
+              {activeCatalogItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} ({item.points} pt)
+                </option>
+              ))}
             </select>
           </div>
 
@@ -288,12 +465,19 @@ export default function App() {
               min="1"
               value={qty}
               onChange={(e) => setQty(Number(e.target.value))}
-              style={{ display: "block", width: "100%", padding: 10, marginTop: 4 }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
             />
           </div>
 
           <div>
-            <button onClick={onCreateOrder}>Bestelling opslaan</button>
+            <button onClick={onCreateOrder} disabled={savingOrder}>
+              {savingOrder ? "Opslaan..." : "Bestelling opslaan"}
+            </button>
           </div>
         </div>
       </div>
@@ -315,7 +499,12 @@ export default function App() {
             <input
               value={newItemName}
               onChange={(e) => setNewItemName(e.target.value)}
-              style={{ display: "block", width: "100%", padding: 10, marginTop: 4 }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
             />
           </div>
 
@@ -325,20 +514,29 @@ export default function App() {
               type="number"
               value={newItemPoints}
               onChange={(e) => setNewItemPoints(e.target.value)}
-              style={{ display: "block", width: "100%", padding: 10, marginTop: 4 }}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 4,
+              }}
             />
           </div>
 
           <div>
-            <button onClick={onAddCatalogItem}>Artikel toevoegen</button>
+            <button onClick={onAddCatalogItem} disabled={savingItem}>
+              {savingItem ? "Opslaan..." : "Artikel toevoegen"}
+            </button>
           </div>
         </div>
       </div>
 
       <h2>Werknemers</h2>
-      {employees.map((e) => (
+      {loadingEmployees ? <div>Werknemers laden...</div> : null}
+
+      {employeesWithStats.map((employee) => (
         <div
-          key={e.id}
+          key={employee.id}
           style={{
             padding: 12,
             borderBottom: "1px solid #eee",
@@ -349,12 +547,14 @@ export default function App() {
           }}
         >
           <div>
-            <strong>{e.full_name}</strong> ({e.status})
-            {!e.active && <span> - inactief</span>}
+            <strong>{employee.full_name || employee.fullName}</strong> (
+            {employee.status}) - budget {employee.budget} / verbruikt{" "}
+            {employee.spent} / saldo {employee.remaining}
+            {!employee.active && <span> - inactief</span>}
           </div>
 
-          {e.active ? (
-            <button onClick={() => onDeactivateEmployee(e.id)}>
+          {employee.active ? (
+            <button onClick={() => onDeactivateEmployee(employee.id)}>
               Inactief zetten
             </button>
           ) : null}
@@ -362,11 +562,65 @@ export default function App() {
       ))}
 
       <h2 style={{ marginTop: 32 }}>Catalogus</h2>
-      {catalogItems.map((c) => (
-        <div key={c.id}>
-          {c.name} ({c.points} pt)
+      {loadingCatalog ? <div>Catalogus laden...</div> : null}
+
+      {catalogItems.map((item) => (
+        <div key={item.id}>
+          {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
         </div>
       ))}
+
+      <h2 style={{ marginTop: 32 }}>Bestellingen per werknemer</h2>
+      {employeesWithStats.map((employee) => {
+        const employeeOrders = ordersByEmployee[employee.id] || [];
+        if (employeeOrders.length === 0) return null;
+
+        return (
+          <div
+            key={employee.id}
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 16,
+              background: "#fff",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>
+              {employee.full_name || employee.fullName}
+            </h3>
+
+            {employeeOrders.map((order) => (
+              <div
+                key={order.id}
+                style={{
+                  borderTop: "1px solid #eee",
+                  paddingTop: 10,
+                  marginTop: 10,
+                }}
+              >
+                <div>
+                  <strong>Datum:</strong> {order.order_date}
+                </div>
+                <div>
+                  <strong>Status:</strong> {order.status}
+                </div>
+                <div>
+                  <strong>Artikels:</strong>
+                </div>
+                <ul>
+                  {(order.lines || []).map((line) => (
+                    <li key={line.id}>
+                      {getItemName(line.item_id)} - {line.qty} x{" "}
+                      {line.points_per_unit} pt
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
