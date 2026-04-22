@@ -8,6 +8,7 @@ export default function App() {
 
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
+  const [loadingOrders, setLoadingOrders] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   const [firstName, setFirstName] = useState("");
@@ -28,6 +29,10 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [activeFilter, setActiveFilter] = useState("active");
 
+  const [detailEmployeeId, setDetailEmployeeId] = useState(null);
+  const [extraPointsInput, setExtraPointsInput] = useState("");
+  const [savingExtraPoints, setSavingExtraPoints] = useState(false);
+
   const activeCatalogItems = useMemo(
     () => catalogItems.filter((item) => item.active),
     [catalogItems]
@@ -43,7 +48,7 @@ export default function App() {
       const spent = orders.reduce((sum, order) => {
         return (
           sum +
-          order.lines.reduce(
+          (order.lines || []).reduce(
             (lineSum, line) => lineSum + line.qty * line.points_per_unit,
             0
           )
@@ -65,9 +70,7 @@ export default function App() {
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase().trim();
       result = result.filter((employee) =>
-        (employee.full_name || "")
-          .toLowerCase()
-          .includes(search)
+        (employee.full_name || "").toLowerCase().includes(search)
       );
     }
 
@@ -87,6 +90,29 @@ export default function App() {
 
     return result;
   }, [employeesWithStats, searchTerm, statusFilter, activeFilter]);
+
+  const selectedEmployee = useMemo(() => {
+    return employeesWithStats.find((employee) => employee.id === detailEmployeeId) || null;
+  }, [employeesWithStats, detailEmployeeId]);
+
+  const dashboardStats = useMemo(() => {
+    const activeEmployees = employeesWithStats.filter((employee) => employee.active);
+    const totalBudget = activeEmployees.reduce((sum, employee) => sum + employee.budget, 0);
+    const totalSpent = activeEmployees.reduce((sum, employee) => sum + employee.spent, 0);
+    const totalRemaining = activeEmployees.reduce((sum, employee) => sum + employee.remaining, 0);
+    const totalOrders = Object.values(ordersByEmployee).reduce(
+      (sum, employeeOrders) => sum + employeeOrders.length,
+      0
+    );
+
+    return {
+      activeEmployees: activeEmployees.length,
+      totalBudget,
+      totalSpent,
+      totalRemaining,
+      totalOrders,
+    };
+  }, [employeesWithStats, ordersByEmployee]);
 
   async function loadEmployees() {
     setLoadingEmployees(true);
@@ -129,6 +155,8 @@ export default function App() {
   }
 
   async function loadOrdersAndLines() {
+    setLoadingOrders(true);
+
     const { data: orders, error: ordersError } = await supabase
       .from("orders")
       .select("*")
@@ -136,6 +164,7 @@ export default function App() {
 
     if (ordersError) {
       console.log("LOAD ORDERS ERROR:", ordersError);
+      setLoadingOrders(false);
       setErrorMessage("Bestellingen konden niet geladen worden.");
       return;
     }
@@ -144,6 +173,8 @@ export default function App() {
       .from("order_lines")
       .select("*")
       .order("id", { ascending: true });
+
+    setLoadingOrders(false);
 
     if (linesError) {
       console.log("LOAD ORDER LINES ERROR:", linesError);
@@ -225,6 +256,45 @@ export default function App() {
         employee.id === id ? { ...employee, active: false } : employee
       )
     );
+
+    if (detailEmployeeId === id) {
+      setDetailEmployeeId(id);
+    }
+  }
+
+  async function onAddExtraPoints() {
+    if (!selectedEmployee || !extraPointsInput) return;
+
+    const pointsToAdd = Number(extraPointsInput);
+    if (!Number.isFinite(pointsToAdd) || pointsToAdd === 0) return;
+
+    setSavingExtraPoints(true);
+    setErrorMessage("");
+
+    const newExtraPoints = (selectedEmployee.extra_points || 0) + pointsToAdd;
+
+    const { error } = await supabase
+      .from("employees")
+      .update({ extra_points: newExtraPoints })
+      .eq("id", selectedEmployee.id);
+
+    setSavingExtraPoints(false);
+
+    if (error) {
+      console.log("ADD EXTRA POINTS ERROR:", error);
+      setErrorMessage("Extra punten konden niet opgeslagen worden.");
+      return;
+    }
+
+    setEmployees((prev) =>
+      prev.map((employee) =>
+        employee.id === selectedEmployee.id
+          ? { ...employee, extra_points: newExtraPoints }
+          : employee
+      )
+    );
+
+    setExtraPointsInput("");
   }
 
   async function onAddCatalogItem() {
@@ -342,12 +412,31 @@ export default function App() {
     return item ? item.name : `Artikel ${itemId}`;
   }
 
+  function blockStyle() {
+    return {
+      border: "1px solid #ddd",
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 24,
+      background: "#f8fafc",
+    };
+  }
+
+  function inputStyle() {
+    return {
+      display: "block",
+      width: "100%",
+      padding: 10,
+      marginTop: 4,
+    };
+  }
+
   return (
     <div
       style={{
         padding: 20,
         fontFamily: "Arial, sans-serif",
-        maxWidth: 1100,
+        maxWidth: 1200,
         margin: "0 auto",
       }}
     >
@@ -369,13 +458,35 @@ export default function App() {
 
       <div
         style={{
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          padding: 16,
+          display: "grid",
+          gap: 16,
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
           marginBottom: 24,
-          background: "#f8fafc",
         }}
       >
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Actieve werknemers</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.activeEmployees}</div>
+        </div>
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Totaal budget</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalBudget}</div>
+        </div>
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Verbruikt</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalSpent}</div>
+        </div>
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Resterend</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalRemaining}</div>
+        </div>
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Bestellingen</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalOrders}</div>
+        </div>
+      </div>
+
+      <div style={blockStyle()}>
         <h2 style={{ marginTop: 0 }}>Nieuwe werknemer</h2>
 
         <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
@@ -384,12 +495,7 @@ export default function App() {
             <input
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             />
           </div>
 
@@ -398,12 +504,7 @@ export default function App() {
             <input
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             />
           </div>
 
@@ -412,12 +513,7 @@ export default function App() {
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             >
               <option value="Arbeider">Arbeider</option>
               <option value="Bediende">Bediende</option>
@@ -432,15 +528,7 @@ export default function App() {
         </div>
       </div>
 
-      <div
-        style={{
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 24,
-          background: "#f8fafc",
-        }}
-      >
+      <div style={blockStyle()}>
         <h2 style={{ marginTop: 0 }}>Nieuwe bestelling</h2>
 
         <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
@@ -449,12 +537,7 @@ export default function App() {
             <select
               value={selectedEmployeeId}
               onChange={(e) => setSelectedEmployeeId(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             >
               <option value="">Kies werknemer</option>
               {employeesWithStats
@@ -472,12 +555,7 @@ export default function App() {
             <select
               value={selectedItemId}
               onChange={(e) => setSelectedItemId(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             >
               <option value="">Kies artikel</option>
               {activeCatalogItems.map((item) => (
@@ -495,12 +573,7 @@ export default function App() {
               min="1"
               value={qty}
               onChange={(e) => setQty(Number(e.target.value))}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             />
           </div>
 
@@ -512,15 +585,7 @@ export default function App() {
         </div>
       </div>
 
-      <div
-        style={{
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 24,
-          background: "#f8fafc",
-        }}
-      >
+      <div style={blockStyle()}>
         <h2 style={{ marginTop: 0 }}>Nieuw artikel</h2>
 
         <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
@@ -529,12 +594,7 @@ export default function App() {
             <input
               value={newItemName}
               onChange={(e) => setNewItemName(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             />
           </div>
 
@@ -544,12 +604,7 @@ export default function App() {
               type="number"
               value={newItemPoints}
               onChange={(e) => setNewItemPoints(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             />
           </div>
 
@@ -561,15 +616,7 @@ export default function App() {
         </div>
       </div>
 
-      <div
-        style={{
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 24,
-          background: "#f8fafc",
-        }}
-      >
+      <div style={blockStyle()}>
         <h2 style={{ marginTop: 0 }}>Zoek en filter werknemers</h2>
 
         <div
@@ -585,12 +632,7 @@ export default function App() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="bv. Meeus of Janssens"
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             />
           </div>
 
@@ -599,12 +641,7 @@ export default function App() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             >
               <option value="all">Alle statuten</option>
               <option value="Arbeider">Arbeider</option>
@@ -617,12 +654,7 @@ export default function App() {
             <select
               value={activeFilter}
               onChange={(e) => setActiveFilter(e.target.value)}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 4,
-              }}
+              style={inputStyle()}
             >
               <option value="active">Alleen actief</option>
               <option value="inactive">Alleen inactief</option>
@@ -632,67 +664,95 @@ export default function App() {
         </div>
       </div>
 
-      <h2>Werknemers</h2>
-      {loadingEmployees ? <div>Werknemers laden...</div> : null}
-      <div style={{ marginBottom: 12 }}>
-        {filteredEmployees.length} werknemer(s) gevonden
-      </div>
-
-      {filteredEmployees.map((employee) => (
-        <div
-          key={employee.id}
-          style={{
-            padding: 12,
-            borderBottom: "1px solid #eee",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
-          <div>
-            <strong>{employee.full_name}</strong> ({employee.status}) - budget{" "}
-            {employee.budget} / verbruikt {employee.spent} / saldo{" "}
-            {employee.remaining}
-            {!employee.active && <span> - inactief</span>}
-          </div>
-
-          {employee.active ? (
-            <button onClick={() => onDeactivateEmployee(employee.id)}>
-              Inactief zetten
-            </button>
-          ) : null}
+      <div style={blockStyle()}>
+        <h2 style={{ marginTop: 0 }}>Werknemers</h2>
+        {loadingEmployees ? <div>Werknemers laden...</div> : null}
+        <div style={{ marginBottom: 12 }}>
+          {filteredEmployees.length} werknemer(s) gevonden
         </div>
-      ))}
 
-      <h2 style={{ marginTop: 32 }}>Catalogus</h2>
-      {loadingCatalog ? <div>Catalogus laden...</div> : null}
-
-      {catalogItems.map((item) => (
-        <div key={item.id}>
-          {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
-        </div>
-      ))}
-
-      <h2 style={{ marginTop: 32 }}>Bestellingen per werknemer</h2>
-      {employeesWithStats.map((employee) => {
-        const employeeOrders = ordersByEmployee[employee.id] || [];
-        if (employeeOrders.length === 0) return null;
-
-        return (
+        {filteredEmployees.map((employee) => (
           <div
             key={employee.id}
             style={{
-              border: "1px solid #ddd",
-              borderRadius: 12,
-              padding: 16,
-              marginBottom: 16,
-              background: "#fff",
+              padding: 12,
+              borderBottom: "1px solid #eee",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
             }}
           >
-            <h3 style={{ marginTop: 0 }}>{employee.full_name}</h3>
+            <div>
+              <strong>{employee.full_name}</strong> ({employee.status}) - budget{" "}
+              {employee.budget} / verbruikt {employee.spent} / saldo{" "}
+              {employee.remaining}
+              {!employee.active && <span> - inactief</span>}
+            </div>
 
-            {employeeOrders.map((order) => (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setDetailEmployeeId(employee.id)}>
+                Detail
+              </button>
+              {employee.active ? (
+                <button onClick={() => onDeactivateEmployee(employee.id)}>
+                  Inactief zetten
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {selectedEmployee ? (
+        <div style={blockStyle()}>
+          <h2 style={{ marginTop: 0 }}>
+            Werknemerdetail: {selectedEmployee.full_name}
+          </h2>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 16,
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              marginBottom: 20,
+            }}
+          >
+            <div>
+              <strong>Statuut:</strong> {selectedEmployee.status}
+            </div>
+            <div>
+              <strong>Budget:</strong> {selectedEmployee.budget}
+            </div>
+            <div>
+              <strong>Verbruikt:</strong> {selectedEmployee.spent}
+            </div>
+            <div>
+              <strong>Saldo:</strong> {selectedEmployee.remaining}
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 320, marginBottom: 20 }}>
+            <label>Extra punten toevoegen</label>
+            <input
+              type="number"
+              value={extraPointsInput}
+              onChange={(e) => setExtraPointsInput(e.target.value)}
+              style={inputStyle()}
+            />
+            <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+              <button onClick={onAddExtraPoints} disabled={savingExtraPoints}>
+                {savingExtraPoints ? "Opslaan..." : "Extra punten opslaan"}
+              </button>
+              <button onClick={() => setDetailEmployeeId(null)}>Sluiten</button>
+            </div>
+          </div>
+
+          <h3>Bestellingen</h3>
+          {(ordersByEmployee[selectedEmployee.id] || []).length === 0 ? (
+            <div>Geen bestellingen voor deze werknemer.</div>
+          ) : (
+            (ordersByEmployee[selectedEmployee.id] || []).map((order) => (
               <div
                 key={order.id}
                 style={{
@@ -707,9 +767,6 @@ export default function App() {
                 <div>
                   <strong>Status:</strong> {order.status}
                 </div>
-                <div>
-                  <strong>Artikels:</strong>
-                </div>
                 <ul>
                   {(order.lines || []).map((line) => (
                     <li key={line.id}>
@@ -719,10 +776,71 @@ export default function App() {
                   ))}
                 </ul>
               </div>
-            ))}
+            ))
+          )}
+        </div>
+      ) : null}
+
+      <div style={blockStyle()}>
+        <h2 style={{ marginTop: 0 }}>Catalogus</h2>
+        {loadingCatalog ? <div>Catalogus laden...</div> : null}
+        {catalogItems.map((item) => (
+          <div key={item.id}>
+            {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
           </div>
-        );
-      })}
+        ))}
+      </div>
+
+      <div style={blockStyle()}>
+        <h2 style={{ marginTop: 0 }}>Bestellingen per werknemer</h2>
+        {loadingOrders ? <div>Bestellingen laden...</div> : null}
+
+        {employeesWithStats.map((employee) => {
+          const employeeOrders = ordersByEmployee[employee.id] || [];
+          if (employeeOrders.length === 0) return null;
+
+          return (
+            <div
+              key={employee.id}
+              style={{
+                border: "1px solid #eee",
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+                background: "#fff",
+              }}
+            >
+              <h3 style={{ marginTop: 0 }}>{employee.full_name}</h3>
+
+              {employeeOrders.map((order) => (
+                <div
+                  key={order.id}
+                  style={{
+                    borderTop: "1px solid #eee",
+                    paddingTop: 10,
+                    marginTop: 10,
+                  }}
+                >
+                  <div>
+                    <strong>Datum:</strong> {order.order_date}
+                  </div>
+                  <div>
+                    <strong>Status:</strong> {order.status}
+                  </div>
+                  <ul>
+                    {(order.lines || []).map((line) => (
+                      <li key={line.id}>
+                        {getItemName(line.item_id)} - {line.qty} x{" "}
+                        {line.points_per_unit} pt
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
