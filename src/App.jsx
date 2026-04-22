@@ -46,7 +46,7 @@ export default function App() {
       const budget = Math.min(500, basePoints + extraPoints);
 
       const orders = ordersByEmployee[employee.id] || [];
-      const spent = orders.reduce((sum, order) => {
+      const newSpent = orders.reduce((sum, order) => {
         return (
           sum +
           (order.lines || []).reduce(
@@ -55,6 +55,9 @@ export default function App() {
           )
         );
       }, 0);
+
+      const openingSpent = employee.opening_spent || 0;
+      const spent = openingSpent + newSpent;
 
       return {
         ...employee,
@@ -224,6 +227,7 @@ export default function App() {
       status,
       active: true,
       extra_points: 0,
+      opening_spent: 0,
     };
 
     const { data, error } = await supabase
@@ -811,7 +815,10 @@ export default function App() {
               <strong>Budget:</strong> {selectedEmployee.budget}
             </div>
             <div>
-              <strong>Verbruikt:</strong> {selectedEmployee.spent}
+              <strong>Historisch verbruikt:</strong> {selectedEmployee.opening_spent || 0}
+            </div>
+            <div>
+              <strong>Totaal verbruikt:</strong> {selectedEmployee.spent}
             </div>
             <div>
               <strong>Saldo:</strong> {selectedEmployee.remaining}
@@ -834,9 +841,9 @@ export default function App() {
             </div>
           </div>
 
-          <h3>Bestellingen</h3>
+          <h3>Nieuwe bestellingen</h3>
           {(ordersByEmployee[selectedEmployee.id] || []).length === 0 ? (
-            <div>Geen bestellingen voor deze werknemer.</div>
+            <div>Geen nieuwe bestellingen voor deze werknemer.</div>
           ) : (
             (ordersByEmployee[selectedEmployee.id] || []).map((order) => (
               <div
@@ -893,7 +900,7 @@ export default function App() {
       </div>
 
       <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Bestellingen per werknemer</h2>
+        <h2 style={{ marginTop: 0 }}>Nieuwe bestellingen per werknemer</h2>
         {loadingOrders ? <div>Bestellingen laden...</div> : null}
 
         {employeesWithStats.map((employee) => {
