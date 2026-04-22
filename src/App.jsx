@@ -19,6 +19,7 @@ export default function App() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [selectedItemId, setSelectedItemId] = useState("");
   const [qty, setQty] = useState(1);
+  const [orderCart, setOrderCart] = useState([]);
   const [savingOrder, setSavingOrder] = useState(false);
 
   const [newItemName, setNewItemName] = useState("");
@@ -113,6 +114,13 @@ export default function App() {
       totalOrders,
     };
   }, [employeesWithStats, ordersByEmployee]);
+
+  const currentOrderTotal = useMemo(() => {
+    return orderCart.reduce(
+      (sum, line) => sum + line.qty * line.points_per_unit,
+      0
+    );
+  }, [orderCart]);
 
   async function loadEmployees() {
     setLoadingEmployees(true);
@@ -256,10 +264,6 @@ export default function App() {
         employee.id === id ? { ...employee, active: false } : employee
       )
     );
-
-    if (detailEmployeeId === id) {
-      setDetailEmployeeId(id);
-    }
   }
 
   async function onAddExtraPoints() {
@@ -327,20 +331,38 @@ export default function App() {
     setNewItemPoints("");
   }
 
-  async function onCreateOrder() {
-    if (!selectedEmployeeId || !selectedItemId || qty <= 0) return;
-
-    setSavingOrder(true);
-    setErrorMessage("");
+  function onAddLineToCart() {
+    if (!selectedItemId || qty <= 0) return;
 
     const item = catalogItems.find(
       (catalogItem) => String(catalogItem.id) === String(selectedItemId)
     );
+    if (!item) return;
 
-    if (!item) {
-      setSavingOrder(false);
-      return;
-    }
+    setOrderCart((prev) => [
+      ...prev,
+      {
+        tempId: Date.now() + Math.random(),
+        item_id: item.id,
+        item_name: item.name,
+        qty: Number(qty),
+        points_per_unit: item.points,
+      },
+    ]);
+
+    setSelectedItemId("");
+    setQty(1);
+  }
+
+  function onRemoveLineFromCart(tempId) {
+    setOrderCart((prev) => prev.filter((line) => line.tempId !== tempId));
+  }
+
+  async function onCreateOrder() {
+    if (!selectedEmployeeId || orderCart.length === 0) return;
+
+    setSavingOrder(true);
+    setErrorMessage("");
 
     const { data: orderData, error: orderError } = await supabase
       .from("orders")
@@ -367,23 +389,23 @@ export default function App() {
       return;
     }
 
+    const insertLines = orderCart.map((line) => ({
+      order_id: order.id,
+      item_id: line.item_id,
+      qty: Number(line.qty),
+      points_per_unit: Number(line.points_per_unit),
+    }));
+
     const { data: lineData, error: lineError } = await supabase
       .from("order_lines")
-      .insert([
-        {
-          order_id: order.id,
-          item_id: item.id,
-          qty: Number(qty),
-          points_per_unit: item.points,
-        },
-      ])
+      .insert(insertLines)
       .select();
 
     setSavingOrder(false);
 
     if (lineError) {
-      console.log("CREATE ORDER LINE ERROR:", lineError);
-      setErrorMessage("Bestellijn kon niet opgeslagen worden.");
+      console.log("CREATE ORDER LINES ERROR:", lineError);
+      setErrorMessage("Bestellijnen konden niet opgeslagen worden.");
       return;
     }
 
@@ -405,6 +427,7 @@ export default function App() {
     setSelectedEmployeeId("");
     setSelectedItemId("");
     setQty(1);
+    setOrderCart([]);
   }
 
   function getItemName(itemId) {
@@ -531,7 +554,7 @@ export default function App() {
       <div style={blockStyle()}>
         <h2 style={{ marginTop: 0 }}>Nieuwe bestelling</h2>
 
-        <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
+        <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
           <div>
             <label>Werknemer</label>
             <select
@@ -577,11 +600,49 @@ export default function App() {
             />
           </div>
 
-          <div>
-            <button onClick={onCreateOrder} disabled={savingOrder}>
-              {savingOrder ? "Opslaan..." : "Bestelling opslaan"}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onAddLineToCart}>Artikel toevoegen aan bestelling</button>
+            <button
+              onClick={onCreateOrder}
+              disabled={savingOrder || !selectedEmployeeId || orderCart.length === 0}
+            >
+              {savingOrder ? "Opslaan..." : "Volledige bestelling opslaan"}
             </button>
           </div>
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <h3>Bestellijnen</h3>
+          {orderCart.length === 0 ? (
+            <div>Nog geen artikels toegevoegd.</div>
+          ) : (
+            <div>
+              {orderCart.map((line) => (
+                <div
+                  key={line.tempId}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    borderBottom: "1px solid #eee",
+                    padding: "8px 0",
+                    gap: 12,
+                  }}
+                >
+                  <div>
+                    {line.item_name} - {line.qty} x {line.points_per_unit} pt ={" "}
+                    {line.qty * line.points_per_unit} pt
+                  </div>
+                  <button onClick={() => onRemoveLineFromCart(line.tempId)}>
+                    Verwijderen
+                  </button>
+                </div>
+              ))}
+              <div style={{ marginTop: 12, fontWeight: 700 }}>
+                Totaal: {currentOrderTotal} pt
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
