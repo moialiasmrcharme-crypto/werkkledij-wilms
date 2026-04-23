@@ -41,6 +41,11 @@ export default function App() {
   const [showEmployees, setShowEmployees] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
   const [showOrdersOverview, setShowOrdersOverview] = useState(false);
+  const [showExports, setShowExports] = useState(false);
+
+  const [editQtyByLineId, setEditQtyByLineId] = useState({});
+  const [addItemByOrderId, setAddItemByOrderId] = useState({});
+  const [addQtyByOrderId, setAddQtyByOrderId] = useState({});
 
   const COLORS = {
     navy: "#1f2a44",
@@ -56,6 +61,8 @@ export default function App() {
     dangerText: "#991b1b",
     infoBg: "#eef4ff",
     infoText: "#1d4ed8",
+    successBg: "#ecfdf3",
+    successText: "#166534",
   };
 
   const activeCatalogItems = useMemo(
@@ -66,7 +73,7 @@ export default function App() {
   const employeesWithStats = useMemo(() => {
     return employees.map((employee) => {
       const basePoints = employee.status === "Arbeider" ? 300 : 40;
-      const extraPoints = employee.extra_points || 0;
+      const extraPoints = Number(employee.extra_points || 0);
       const budget = Math.min(500, basePoints + extraPoints);
 
       const orders = ordersByEmployee[employee.id] || [];
@@ -74,13 +81,15 @@ export default function App() {
         return (
           sum +
           (order.lines || []).reduce(
-            (lineSum, line) => lineSum + line.qty * line.points_per_unit,
+            (lineSum, line) =>
+              lineSum +
+              Number(line.qty || 0) * Number(line.points_per_unit || 0),
             0
           )
         );
       }, 0);
 
-      const openingSpent = employee.opening_spent || 0;
+      const openingSpent = Number(employee.opening_spent || 0);
       const spent = openingSpent + newSpent;
 
       return {
@@ -121,8 +130,9 @@ export default function App() {
 
   const selectedEmployee = useMemo(() => {
     return (
-      employeesWithStats.find((employee) => employee.id === Number(detailEmployeeId)) ||
-      null
+      employeesWithStats.find(
+        (employee) => employee.id === Number(detailEmployeeId)
+      ) || null
     );
   }, [employeesWithStats, detailEmployeeId]);
 
@@ -136,9 +146,18 @@ export default function App() {
 
   const dashboardStats = useMemo(() => {
     const activeEmployees = employeesWithStats.filter((employee) => employee.active);
-    const totalBudget = activeEmployees.reduce((sum, employee) => sum + employee.budget, 0);
-    const totalSpent = activeEmployees.reduce((sum, employee) => sum + employee.spent, 0);
-    const totalRemaining = activeEmployees.reduce((sum, employee) => sum + employee.remaining, 0);
+    const totalBudget = activeEmployees.reduce(
+      (sum, employee) => sum + employee.budget,
+      0
+    );
+    const totalSpent = activeEmployees.reduce(
+      (sum, employee) => sum + employee.spent,
+      0
+    );
+    const totalRemaining = activeEmployees.reduce(
+      (sum, employee) => sum + employee.remaining,
+      0
+    );
     const totalOrders = Object.values(ordersByEmployee).reduce(
       (sum, employeeOrders) => sum + employeeOrders.length,
       0
@@ -155,7 +174,8 @@ export default function App() {
 
   const currentOrderTotal = useMemo(() => {
     return orderCart.reduce(
-      (sum, line) => sum + line.qty * line.points_per_unit,
+      (sum, line) =>
+        sum + Number(line.qty || 0) * Number(line.points_per_unit || 0),
       0
     );
   }, [orderCart]);
@@ -325,7 +345,7 @@ export default function App() {
     setSavingExtraPoints(true);
     setErrorMessage("");
 
-    const newExtraPoints = (selectedEmployee.extra_points || 0) + pointsToAdd;
+    const newExtraPoints = Number(selectedEmployee.extra_points || 0) + pointsToAdd;
 
     const { error } = await supabase
       .from("employees")
@@ -523,9 +543,189 @@ export default function App() {
     }
   }
 
+  async function onDeleteOrder(orderId) {
+    setErrorMessage("");
+
+    const { error: linesError } = await supabase
+      .from("order_lines")
+      .delete()
+      .eq("order_id", orderId);
+
+    if (linesError) {
+      console.log("DELETE ORDER LINES ERROR:", linesError);
+      setErrorMessage("Bestellijnen konden niet verwijderd worden.");
+      return;
+    }
+
+    const { error: orderError } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId);
+
+    if (orderError) {
+      console.log("DELETE ORDER ERROR:", orderError);
+      setErrorMessage("Bestelling kon niet verwijderd worden.");
+      return;
+    }
+
+    await loadOrdersAndLines();
+  }
+
+  async function onDeleteOrderLine(lineId) {
+    setErrorMessage("");
+
+    const { error } = await supabase
+      .from("order_lines")
+      .delete()
+      .eq("id", lineId);
+
+    if (error) {
+      console.log("DELETE ORDER LINE ERROR:", error);
+      setErrorMessage("Bestellijn kon niet verwijderd worden.");
+      return;
+    }
+
+    await loadOrdersAndLines();
+  }
+
+  async function onUpdateOrderLineQty(lineId) {
+    const nextQty = Number(editQtyByLineId[lineId]);
+
+    if (!Number.isFinite(nextQty) || nextQty <= 0) {
+      setErrorMessage("Aantal moet groter zijn dan 0.");
+      return;
+    }
+
+    setErrorMessage("");
+
+    const { error } = await supabase
+      .from("order_lines")
+      .update({ qty: nextQty })
+      .eq("id", lineId);
+
+    if (error) {
+      console.log("UPDATE ORDER LINE QTY ERROR:", error);
+      setErrorMessage("Aantal kon niet aangepast worden.");
+      return;
+    }
+
+    await loadOrdersAndLines();
+  }
+
+  async function onAddLineToExistingOrder(orderId) {
+    const itemId = Number(addItemByOrderId[orderId]);
+    const addQty = Number(addQtyByOrderId[orderId] || 1);
+
+    if (!itemId || !Number.isFinite(addQty) || addQty <= 0) {
+      setErrorMessage("Kies een artikel en geldig aantal.");
+      return;
+    }
+
+    const item = catalogItems.find((catalogItem) => catalogItem.id === itemId);
+    if (!item) {
+      setErrorMessage("Artikel niet gevonden.");
+      return;
+    }
+
+    setErrorMessage("");
+
+    const { error } = await supabase
+      .from("order_lines")
+      .insert([
+        {
+          order_id: orderId,
+          item_id: item.id,
+          qty: addQty,
+          points_per_unit: item.points,
+        },
+      ]);
+
+    if (error) {
+      console.log("ADD LINE TO EXISTING ORDER ERROR:", error);
+      setErrorMessage("Artikel kon niet toegevoegd worden aan bestelling.");
+      return;
+    }
+
+    setAddItemByOrderId((prev) => ({ ...prev, [orderId]: "" }));
+    setAddQtyByOrderId((prev) => ({ ...prev, [orderId]: 1 }));
+
+    await loadOrdersAndLines();
+  }
+
   function getItemName(itemId) {
     const item = catalogItems.find((catalogItem) => catalogItem.id === itemId);
     return item ? item.name : `Artikel ${itemId}`;
+  }
+
+  function exportEmployeesCsv() {
+    const rows = employeesWithStats.map((employee) => ({
+      full_name: employee.full_name || "",
+      first_name: employee.first_name || "",
+      last_name: employee.last_name || "",
+      status: employee.status || "",
+      active: employee.active ? "true" : "false",
+      extra_points: employee.extra_points || 0,
+      opening_spent: employee.opening_spent || 0,
+      budget: employee.budget || 0,
+      spent: employee.spent || 0,
+      remaining: employee.remaining || 0,
+    }));
+
+    downloadCsv("werknemers_export.csv", rows);
+  }
+
+  function exportOrdersCsv() {
+    const rows = [];
+
+    employeesWithStats.forEach((employee) => {
+      const employeeOrders = ordersByEmployee[employee.id] || [];
+
+      employeeOrders.forEach((order) => {
+        (order.lines || []).forEach((line) => {
+          rows.push({
+            employee_name: employee.full_name || "",
+            order_id: order.id,
+            order_date: order.order_date || "",
+            status: order.status || "",
+            item_name: getItemName(line.item_id),
+            qty: line.qty || 0,
+            points_per_unit: line.points_per_unit || 0,
+            line_total:
+              Number(line.qty || 0) * Number(line.points_per_unit || 0),
+          });
+        });
+      });
+    });
+
+    downloadCsv("bestellingen_export.csv", rows);
+  }
+
+  function downloadCsv(filename, rows) {
+    if (!rows || rows.length === 0) {
+      setErrorMessage("Er is geen data om te exporteren.");
+      return;
+    }
+
+    const headers = Object.keys(rows[0]);
+    const escapeCell = (value) => {
+      const stringValue = String(value ?? "");
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    };
+
+    const csvContent = [
+      headers.map(escapeCell).join(";"),
+      ...rows.map((row) => headers.map((header) => escapeCell(row[header])).join(";")),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 
   function blockStyle() {
@@ -570,6 +770,18 @@ export default function App() {
       background: "#fff",
       color: COLORS.navy,
       border: `1px solid ${COLORS.border}`,
+      borderRadius: 10,
+      padding: "10px 14px",
+      fontWeight: 600,
+      cursor: "pointer",
+    };
+  }
+
+  function dangerButtonStyle() {
+    return {
+      background: "#fff",
+      color: COLORS.dangerText,
+      border: "1px solid #fecaca",
       borderRadius: 10,
       padding: "10px 14px",
       fontWeight: 600,
@@ -645,6 +857,148 @@ export default function App() {
     );
   }
 
+  function renderOrder(order, employeeName = "") {
+    return (
+      <div
+        key={order.id}
+        style={{
+          borderTop: `1px solid ${COLORS.border}`,
+          paddingTop: 10,
+          marginTop: 10,
+        }}
+      >
+        <div style={{ marginBottom: 6 }}>
+          <strong>Datum:</strong> {order.order_date}
+        </div>
+        <div style={{ marginBottom: 6 }}>
+          <strong>Status:</strong> {order.status}
+        </div>
+        {employeeName ? (
+          <div style={{ marginBottom: 6 }}>
+            <strong>Werknemer:</strong> {employeeName}
+          </div>
+        ) : null}
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          <button style={dangerButtonStyle()} onClick={() => onDeleteOrder(order.id)}>
+            Volledige bestelling verwijderen
+          </button>
+        </div>
+
+        <div>
+          {(order.lines || []).map((line) => (
+            <div
+              key={line.id}
+              style={{
+                display: "grid",
+                gap: 8,
+                gridTemplateColumns: "2fr 1fr 1fr auto auto",
+                alignItems: "center",
+                borderBottom: `1px solid ${COLORS.border}`,
+                padding: "8px 0",
+              }}
+            >
+              <div>{getItemName(line.item_id)}</div>
+              <div>{line.points_per_unit} pt/stuk</div>
+              <div>
+                <input
+                  type="number"
+                  min="1"
+                  value={editQtyByLineId[line.id] ?? line.qty}
+                  onChange={(e) =>
+                    setEditQtyByLineId((prev) => ({
+                      ...prev,
+                      [line.id]: e.target.value,
+                    }))
+                  }
+                  style={{ ...inputStyle(), marginTop: 0, padding: 8 }}
+                />
+              </div>
+              <button
+                style={secondaryButtonStyle()}
+                onClick={() => onUpdateOrderLineQty(line.id)}
+              >
+                Aantal opslaan
+              </button>
+              <button
+                style={dangerButtonStyle()}
+                onClick={() => onDeleteOrderLine(line.id)}
+              >
+                Lijn verwijderen
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: 12,
+            background: COLORS.infoBg,
+            border: "1px solid #bfdbfe",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8, color: COLORS.navy }}>
+            Artikel toevoegen aan bestaande bestelling
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gap: 8,
+              gridTemplateColumns: "2fr 1fr auto",
+              alignItems: "end",
+            }}
+          >
+            <div>
+              <label>Artikel</label>
+              <select
+                value={addItemByOrderId[order.id] || ""}
+                onChange={(e) =>
+                  setAddItemByOrderId((prev) => ({
+                    ...prev,
+                    [order.id]: e.target.value,
+                  }))
+                }
+                style={inputStyle()}
+              >
+                <option value="">Kies artikel</option>
+                {activeCatalogItems.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} ({item.points} pt)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label>Aantal</label>
+              <input
+                type="number"
+                min="1"
+                value={addQtyByOrderId[order.id] || 1}
+                onChange={(e) =>
+                  setAddQtyByOrderId((prev) => ({
+                    ...prev,
+                    [order.id]: e.target.value,
+                  }))
+                }
+                style={inputStyle()}
+              />
+            </div>
+
+            <button
+              style={secondaryButtonStyle()}
+              onClick={() => onAddLineToExistingOrder(order.id)}
+            >
+              Toevoegen
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -663,41 +1017,24 @@ export default function App() {
           borderRadius: 18,
           padding: 20,
           marginBottom: 20,
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
         }}
       >
-        <img
-          src="/wilms-logo.png"
-          alt="Wilms"
+        <div
           style={{
-            height: 54,
-            width: "auto",
-            background: "#fff",
-            padding: 8,
-            borderRadius: 12,
+            display: "inline-block",
+            background: COLORS.yellow,
+            color: COLORS.navy,
+            fontWeight: 800,
+            padding: "6px 12px",
+            borderRadius: 999,
+            marginBottom: 10,
           }}
-        />
-        <div>
-          <div
-            style={{
-              display: "inline-block",
-              background: COLORS.yellow,
-              color: COLORS.navy,
-              fontWeight: 800,
-              padding: "6px 12px",
-              borderRadius: 999,
-              marginBottom: 10,
-            }}
-          >
-            Werkkledijbeheer
-          </div>
-          <h1 style={{ margin: 0, fontSize: 30 }}>Werkkledij Wilms</h1>
-          <div style={{ marginTop: 6, opacity: 0.9 }}>
-            Beheer werknemers, punten en bestellingen op één plek
-          </div>
+        >
+          Werkkledijbeheer
+        </div>
+        <h1 style={{ margin: 0, fontSize: 30 }}>Werkkledij Wilms</h1>
+        <div style={{ marginTop: 6, opacity: 0.9 }}>
+          Beheer werknemers, punten, artikels en bestellingen op één plek
         </div>
       </div>
 
@@ -1025,30 +1362,9 @@ export default function App() {
           {(ordersByEmployee[selectedEmployee.id] || []).length === 0 ? (
             <div style={{ color: COLORS.muted }}>Geen bestellingen voor deze werknemer.</div>
           ) : (
-            (ordersByEmployee[selectedEmployee.id] || []).map((order) => (
-              <div
-                key={order.id}
-                style={{
-                  borderTop: `1px solid ${COLORS.border}`,
-                  paddingTop: 10,
-                  marginTop: 10,
-                }}
-              >
-                <div style={{ marginBottom: 6 }}>
-                  <strong>Datum:</strong> {order.order_date}
-                </div>
-                <div style={{ marginBottom: 6 }}>
-                  <strong>Status:</strong> {order.status}
-                </div>
-                <ul>
-                  {(order.lines || []).map((line) => (
-                    <li key={line.id}>
-                      {getItemName(line.item_id)} - {line.qty} x {line.points_per_unit} pt
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))
+            (ordersByEmployee[selectedEmployee.id] || []).map((order) =>
+              renderOrder(order)
+            )
           )}
         </div>
       ) : null}
@@ -1103,35 +1419,27 @@ export default function App() {
                   }}
                 >
                   <h3 style={{ marginTop: 0, color: COLORS.navy }}>{employee.full_name}</h3>
-
-                  {employeeOrders.map((order) => (
-                    <div
-                      key={order.id}
-                      style={{
-                        borderTop: `1px solid ${COLORS.border}`,
-                        paddingTop: 10,
-                        marginTop: 10,
-                      }}
-                    >
-                      <div style={{ marginBottom: 6 }}>
-                        <strong>Datum:</strong> {order.order_date}
-                      </div>
-                      <div style={{ marginBottom: 6 }}>
-                        <strong>Status:</strong> {order.status}
-                      </div>
-                      <ul>
-                        {(order.lines || []).map((line) => (
-                          <li key={line.id}>
-                            {getItemName(line.item_id)} - {line.qty} x {line.points_per_unit} pt
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                  {employeeOrders.map((order) =>
+                    renderOrder(order, employee.full_name)
+                  )}
                 </div>
               );
             })}
           </>
+        ) : null}
+      </div>
+
+      <div style={blockStyle()}>
+        {sectionHeader("Export", showExports, setShowExports)}
+        {showExports ? (
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button style={secondaryButtonStyle()} onClick={exportEmployeesCsv}>
+              Exporteer werknemers CSV
+            </button>
+            <button style={secondaryButtonStyle()} onClick={exportOrdersCsv}>
+              Exporteer bestellingen CSV
+            </button>
+          </div>
         ) : null}
       </div>
     </div>
