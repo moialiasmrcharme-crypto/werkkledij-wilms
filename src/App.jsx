@@ -42,6 +42,23 @@ export default function App() {
   const [showCatalog, setShowCatalog] = useState(false);
   const [showOrdersOverview, setShowOrdersOverview] = useState(false);
 
+  const COLORS = {
+    navy: "#1f2a44",
+    yellow: "#f2c300",
+    yellowSoft: "#fff6cc",
+    bg: "#f5f7fb",
+    card: "#ffffff",
+    border: "#d9dee8",
+    text: "#1c2434",
+    muted: "#667085",
+    dangerBg: "#fee2e2",
+    dangerText: "#991b1b",
+    infoBg: "#eef4ff",
+    infoText: "#1d4ed8",
+    successBg: "#ecfdf3",
+    successText: "#166534",
+  };
+
   const activeCatalogItems = useMemo(
     () => catalogItems.filter((item) => item.active),
     [catalogItems]
@@ -514,11 +531,12 @@ export default function App() {
 
   function blockStyle() {
     return {
-      border: "1px solid #ddd",
-      borderRadius: 12,
+      border: `1px solid ${COLORS.border}`,
+      borderRadius: 16,
       padding: 16,
-      marginBottom: 24,
-      background: "#f8fafc",
+      marginBottom: 20,
+      background: COLORS.card,
+      boxShadow: "0 2px 10px rgba(16,24,40,0.05)",
     };
   }
 
@@ -526,8 +544,48 @@ export default function App() {
     return {
       display: "block",
       width: "100%",
-      padding: 10,
+      padding: 11,
       marginTop: 4,
+      borderRadius: 10,
+      border: `1px solid ${COLORS.border}`,
+      background: "#fff",
+      color: COLORS.text,
+      fontSize: 14,
+    };
+  }
+
+  function primaryButtonStyle(disabled = false) {
+    return {
+      background: disabled ? "#c9ced8" : COLORS.navy,
+      color: "#fff",
+      border: "none",
+      borderRadius: 10,
+      padding: "10px 14px",
+      fontWeight: 600,
+      cursor: disabled ? "not-allowed" : "pointer",
+    };
+  }
+
+  function secondaryButtonStyle() {
+    return {
+      background: "#fff",
+      color: COLORS.navy,
+      border: `1px solid ${COLORS.border}`,
+      borderRadius: 10,
+      padding: "10px 14px",
+      fontWeight: 600,
+      cursor: "pointer",
+    };
+  }
+
+  function warningCardStyle(isWarning) {
+    return {
+      marginTop: 16,
+      padding: 12,
+      borderRadius: 12,
+      background: isWarning ? COLORS.dangerBg : COLORS.infoBg,
+      color: isWarning ? COLORS.dangerText : COLORS.infoText,
+      border: `1px solid ${isWarning ? "#fecaca" : "#bfdbfe"}`,
     };
   }
 
@@ -542,12 +600,47 @@ export default function App() {
           marginBottom: isOpen ? 16 : 0,
         }}
       >
-        <h2 style={{ margin: 0 }}>{title}</h2>
+        <div>
+          <div
+            style={{
+              display: "inline-block",
+              background: COLORS.yellowSoft,
+              color: COLORS.navy,
+              padding: "4px 10px",
+              borderRadius: 999,
+              fontSize: 12,
+              fontWeight: 700,
+              marginBottom: 8,
+            }}
+          >
+            WILMS
+          </div>
+          <h2 style={{ margin: 0, color: COLORS.navy }}>{title}</h2>
+        </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {extra}
-          <button onClick={() => setOpen(!isOpen)}>
+          <button style={secondaryButtonStyle()} onClick={() => setOpen(!isOpen)}>
             {isOpen ? "Dichtvouwen" : "Openvouwen"}
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  function statCard(label, value) {
+    return (
+      <div
+        style={{
+          background: COLORS.card,
+          border: `1px solid ${COLORS.border}`,
+          borderRadius: 16,
+          padding: 16,
+          boxShadow: "0 2px 10px rgba(16,24,40,0.05)",
+        }}
+      >
+        <div style={{ fontSize: 13, color: COLORS.muted }}>{label}</div>
+        <div style={{ fontSize: 28, fontWeight: 800, color: COLORS.navy, marginTop: 6 }}>
+          {value}
         </div>
       </div>
     );
@@ -560,18 +653,47 @@ export default function App() {
         fontFamily: "Arial, sans-serif",
         maxWidth: 1200,
         margin: "0 auto",
+        color: COLORS.text,
+        background: COLORS.bg,
       }}
     >
-      <h1>Werkkledij Wilms (Admin)</h1>
+      <div
+        style={{
+          background: `linear-gradient(135deg, ${COLORS.navy} 0%, #2e3e63 100%)`,
+          color: "#fff",
+          borderRadius: 18,
+          padding: 20,
+          marginBottom: 20,
+        }}
+      >
+        <div
+          style={{
+            display: "inline-block",
+            background: COLORS.yellow,
+            color: COLORS.navy,
+            fontWeight: 800,
+            padding: "6px 12px",
+            borderRadius: 999,
+            marginBottom: 10,
+          }}
+        >
+          Werkkledijbeheer
+        </div>
+        <h1 style={{ margin: 0, fontSize: 30 }}>Werkkledij Wilms</h1>
+        <div style={{ marginTop: 6, opacity: 0.9 }}>
+          Beheer werknemers, punten en bestellingen op één plek
+        </div>
+      </div>
 
       {errorMessage ? (
         <div
           style={{
-            background: "#fee2e2",
-            color: "#991b1b",
+            background: COLORS.dangerBg,
+            color: COLORS.dangerText,
             padding: 12,
-            borderRadius: 8,
+            borderRadius: 12,
             marginBottom: 20,
+            border: "1px solid #fecaca",
           }}
         >
           {errorMessage}
@@ -582,30 +704,15 @@ export default function App() {
         style={{
           display: "grid",
           gap: 16,
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          marginBottom: 24,
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          marginBottom: 20,
         }}
       >
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Actieve werknemers</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.activeEmployees}</div>
-        </div>
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Totaal budget</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalBudget}</div>
-        </div>
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Verbruikt</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalSpent}</div>
-        </div>
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Resterend</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalRemaining}</div>
-        </div>
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Bestellingen</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalOrders}</div>
-        </div>
+        {statCard("Actieve werknemers", dashboardStats.activeEmployees)}
+        {statCard("Totaal budget", dashboardStats.totalBudget)}
+        {statCard("Verbruikt", dashboardStats.totalSpent)}
+        {statCard("Resterend", dashboardStats.totalRemaining)}
+        {statCard("Bestellingen", dashboardStats.totalOrders)}
       </div>
 
       <div style={blockStyle()}>
@@ -616,12 +723,10 @@ export default function App() {
               <label>Voornaam</label>
               <input value={firstName} onChange={(e) => setFirstName(e.target.value)} style={inputStyle()} />
             </div>
-
             <div>
               <label>Achternaam</label>
               <input value={lastName} onChange={(e) => setLastName(e.target.value)} style={inputStyle()} />
             </div>
-
             <div>
               <label>Statuut</label>
               <select value={status} onChange={(e) => setStatus(e.target.value)} style={inputStyle()}>
@@ -629,9 +734,8 @@ export default function App() {
                 <option value="Bediende">Bediende</option>
               </select>
             </div>
-
             <div>
-              <button onClick={onAddEmployee} disabled={savingEmployee}>
+              <button style={primaryButtonStyle(savingEmployee)} onClick={onAddEmployee} disabled={savingEmployee}>
                 {savingEmployee ? "Opslaan..." : "Werknemer toevoegen"}
               </button>
             </div>
@@ -690,42 +794,24 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={onAddLineToCart}>Artikel toevoegen aan bestelling</button>
+                <button style={secondaryButtonStyle()} onClick={onAddLineToCart}>
+                  Artikel toevoegen
+                </button>
                 <button
+                  style={primaryButtonStyle(savingOrder || !selectedEmployeeId || orderCart.length === 0)}
                   onClick={onCreateOrder}
                   disabled={savingOrder || !selectedEmployeeId || orderCart.length === 0}
                 >
-                  {savingOrder ? "Opslaan..." : "Volledige bestelling opslaan"}
+                  {savingOrder ? "Opslaan..." : "Bestelling opslaan"}
                 </button>
               </div>
             </div>
 
             {selectedOrderEmployee ? (
-              <div
-                style={{
-                  marginTop: 16,
-                  padding: 12,
-                  borderRadius: 8,
-                  background:
-                    projectedRemaining !== null && projectedRemaining < 0
-                      ? "#fee2e2"
-                      : "#eff6ff",
-                  color:
-                    projectedRemaining !== null && projectedRemaining < 0
-                      ? "#991b1b"
-                      : "#1d4ed8",
-                }}
-              >
-                <div>
-                  <strong>Huidig saldo:</strong> {selectedOrderEmployee.remaining} pt
-                </div>
-                <div>
-                  <strong>Bestelling in mandje:</strong> {currentOrderTotal} pt
-                </div>
-                <div>
-                  <strong>Saldo na bestelling:</strong>{" "}
-                  {projectedRemaining !== null ? projectedRemaining : "-"} pt
-                </div>
+              <div style={warningCardStyle(projectedRemaining !== null && projectedRemaining < 0)}>
+                <div><strong>Huidig saldo:</strong> {selectedOrderEmployee.remaining} pt</div>
+                <div><strong>Bestelling in mandje:</strong> {currentOrderTotal} pt</div>
+                <div><strong>Saldo na bestelling:</strong> {projectedRemaining !== null ? projectedRemaining : "-"} pt</div>
                 {projectedRemaining !== null && projectedRemaining < 0 ? (
                   <div style={{ marginTop: 8, fontWeight: 700 }}>
                     Waarschuwing: deze bestelling gaat boven het beschikbare saldo.
@@ -735,9 +821,9 @@ export default function App() {
             ) : null}
 
             <div style={{ marginTop: 20 }}>
-              <h3>Bestellijnen</h3>
+              <h3 style={{ color: COLORS.navy }}>Bestellijnen</h3>
               {orderCart.length === 0 ? (
-                <div>Nog geen artikels toegevoegd.</div>
+                <div style={{ color: COLORS.muted }}>Nog geen artikels toegevoegd.</div>
               ) : (
                 <div>
                   {orderCart.map((line) => (
@@ -747,7 +833,7 @@ export default function App() {
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        borderBottom: "1px solid #eee",
+                        borderBottom: `1px solid ${COLORS.border}`,
                         padding: "8px 0",
                         gap: 12,
                       }}
@@ -756,12 +842,12 @@ export default function App() {
                         {line.item_name} - {line.qty} x {line.points_per_unit} pt ={" "}
                         {line.qty * line.points_per_unit} pt
                       </div>
-                      <button onClick={() => onRemoveLineFromCart(line.tempId)}>
+                      <button style={secondaryButtonStyle()} onClick={() => onRemoveLineFromCart(line.tempId)}>
                         Verwijderen
                       </button>
                     </div>
                   ))}
-                  <div style={{ marginTop: 12, fontWeight: 700 }}>
+                  <div style={{ marginTop: 12, fontWeight: 800, color: COLORS.navy }}>
                     Totaal: {currentOrderTotal} pt
                   </div>
                 </div>
@@ -779,14 +865,12 @@ export default function App() {
               <label>Artikelnaam</label>
               <input value={newItemName} onChange={(e) => setNewItemName(e.target.value)} style={inputStyle()} />
             </div>
-
             <div>
               <label>Punten</label>
               <input type="number" value={newItemPoints} onChange={(e) => setNewItemPoints(e.target.value)} style={inputStyle()} />
             </div>
-
             <div>
-              <button onClick={onAddCatalogItem} disabled={savingItem}>
+              <button style={primaryButtonStyle(savingItem)} onClick={onAddCatalogItem} disabled={savingItem}>
                 {savingItem ? "Opslaan..." : "Artikel toevoegen"}
               </button>
             </div>
@@ -840,7 +924,7 @@ export default function App() {
           "Werknemers",
           showEmployees,
           setShowEmployees,
-          <span>{filteredEmployees.length} gevonden</span>
+          <span style={{ color: COLORS.muted }}>{filteredEmployees.length} gevonden</span>
         )}
         {showEmployees ? (
           <>
@@ -850,7 +934,7 @@ export default function App() {
                 key={employee.id}
                 style={{
                   padding: 12,
-                  borderBottom: "1px solid #eee",
+                  borderBottom: `1px solid ${COLORS.border}`,
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
@@ -860,14 +944,18 @@ export default function App() {
                 <div>
                   <strong>{employee.full_name}</strong> ({employee.status}) - budget{" "}
                   {employee.budget} / verbruikt {employee.spent} / saldo{" "}
-                  {employee.remaining}
+                  <span style={{ color: employee.remaining < 0 ? COLORS.dangerText : COLORS.text, fontWeight: 700 }}>
+                    {employee.remaining}
+                  </span>
                   {!employee.active && <span> - inactief</span>}
                 </div>
 
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setDetailEmployeeId(employee.id)}>Detail</button>
+                  <button style={secondaryButtonStyle()} onClick={() => setDetailEmployeeId(employee.id)}>
+                    Detail
+                  </button>
                   {employee.active ? (
-                    <button onClick={() => onDeactivateEmployee(employee.id)}>
+                    <button style={secondaryButtonStyle()} onClick={() => onDeactivateEmployee(employee.id)}>
                       Inactief zetten
                     </button>
                   ) : null}
@@ -880,7 +968,7 @@ export default function App() {
 
       {selectedEmployee ? (
         <div style={blockStyle()}>
-          <h2 style={{ marginTop: 0 }}>
+          <h2 style={{ marginTop: 0, color: COLORS.navy }}>
             Werknemerdetail: {selectedEmployee.full_name}
           </h2>
 
@@ -908,22 +996,24 @@ export default function App() {
               style={inputStyle()}
             />
             <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-              <button onClick={onAddExtraPoints} disabled={savingExtraPoints}>
+              <button style={primaryButtonStyle(savingExtraPoints)} onClick={onAddExtraPoints} disabled={savingExtraPoints}>
                 {savingExtraPoints ? "Opslaan..." : "Extra punten opslaan"}
               </button>
-              <button onClick={() => setDetailEmployeeId(null)}>Sluiten</button>
+              <button style={secondaryButtonStyle()} onClick={() => setDetailEmployeeId(null)}>
+                Sluiten
+              </button>
             </div>
           </div>
 
-          <h3>Bestellingen</h3>
+          <h3 style={{ color: COLORS.navy }}>Bestellingen</h3>
           {(ordersByEmployee[selectedEmployee.id] || []).length === 0 ? (
-            <div>Geen bestellingen voor deze werknemer.</div>
+            <div style={{ color: COLORS.muted }}>Geen bestellingen voor deze werknemer.</div>
           ) : (
             (ordersByEmployee[selectedEmployee.id] || []).map((order) => (
               <div
                 key={order.id}
                 style={{
-                  borderTop: "1px solid #eee",
+                  borderTop: `1px solid ${COLORS.border}`,
                   paddingTop: 10,
                   marginTop: 10,
                 }}
@@ -960,14 +1050,14 @@ export default function App() {
                   justifyContent: "space-between",
                   gap: 12,
                   padding: "8px 0",
-                  borderBottom: "1px solid #eee",
+                  borderBottom: `1px solid ${COLORS.border}`,
                   alignItems: "center",
                 }}
               >
                 <div>
                   {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
                 </div>
-                <button onClick={() => onToggleCatalogItem(item)}>
+                <button style={secondaryButtonStyle()} onClick={() => onToggleCatalogItem(item)}>
                   {item.active ? "Inactief zetten" : "Activeren"}
                 </button>
               </div>
@@ -989,20 +1079,20 @@ export default function App() {
                 <div
                   key={employee.id}
                   style={{
-                    border: "1px solid #eee",
-                    borderRadius: 8,
+                    border: `1px solid ${COLORS.border}`,
+                    borderRadius: 12,
                     padding: 12,
                     marginBottom: 12,
                     background: "#fff",
                   }}
                 >
-                  <h3 style={{ marginTop: 0 }}>{employee.full_name}</h3>
+                  <h3 style={{ marginTop: 0, color: COLORS.navy }}>{employee.full_name}</h3>
 
                   {employeeOrders.map((order) => (
                     <div
                       key={order.id}
                       style={{
-                        borderTop: "1px solid #eee",
+                        borderTop: `1px solid ${COLORS.border}`,
                         paddingTop: 10,
                         marginTop: 10,
                       }}
