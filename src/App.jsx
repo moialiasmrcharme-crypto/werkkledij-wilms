@@ -34,13 +34,13 @@ export default function App() {
   const [extraPointsInput, setExtraPointsInput] = useState("");
   const [savingExtraPoints, setSavingExtraPoints] = useState(false);
 
-  const ORDER_STATUSES = [
-    "In aanvraag",
-    "Goedgekeurd",
-    "Besteld",
-    "Geleverd",
-    "Geannuleerd",
-  ];
+  const [showNewEmployee, setShowNewEmployee] = useState(true);
+  const [showNewOrder, setShowNewOrder] = useState(true);
+  const [showNewItem, setShowNewItem] = useState(false);
+  const [showSearchFilter, setShowSearchFilter] = useState(true);
+  const [showEmployees, setShowEmployees] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [showOrdersOverview, setShowOrdersOverview] = useState(false);
 
   const activeCatalogItems = useMemo(
     () => catalogItems.filter((item) => item.active),
@@ -55,7 +55,6 @@ export default function App() {
 
       const orders = ordersByEmployee[employee.id] || [];
       const newSpent = orders.reduce((sum, order) => {
-        if (order.status === "Geannuleerd") return sum;
         return (
           sum +
           (order.lines || []).reduce(
@@ -105,8 +104,19 @@ export default function App() {
   }, [employeesWithStats, searchTerm, statusFilter, activeFilter]);
 
   const selectedEmployee = useMemo(() => {
-    return employeesWithStats.find((employee) => employee.id === detailEmployeeId) || null;
+    return (
+      employeesWithStats.find((employee) => employee.id === Number(detailEmployeeId)) ||
+      null
+    );
   }, [employeesWithStats, detailEmployeeId]);
+
+  const selectedOrderEmployee = useMemo(() => {
+    return (
+      employeesWithStats.find(
+        (employee) => employee.id === Number(selectedEmployeeId)
+      ) || null
+    );
+  }, [employeesWithStats, selectedEmployeeId]);
 
   const dashboardStats = useMemo(() => {
     const activeEmployees = employeesWithStats.filter((employee) => employee.active);
@@ -134,6 +144,11 @@ export default function App() {
     );
   }, [orderCart]);
 
+  const projectedRemaining = useMemo(() => {
+    if (!selectedOrderEmployee) return null;
+    return selectedOrderEmployee.remaining - currentOrderTotal;
+  }, [selectedOrderEmployee, currentOrderTotal]);
+
   async function loadEmployees() {
     setLoadingEmployees(true);
     setErrorMessage("");
@@ -141,7 +156,7 @@ export default function App() {
     const { data, error } = await supabase
       .from("employees")
       .select("*")
-      .order("id", { ascending: true });
+      .order("full_name", { ascending: true });
 
     setLoadingEmployees(false);
 
@@ -252,10 +267,16 @@ export default function App() {
       return;
     }
 
-    setEmployees((prev) => [...prev, ...(data || [])]);
+    setEmployees((prev) =>
+      [...prev, ...(data || [])].sort((a, b) =>
+        (a.full_name || "").localeCompare(b.full_name || "", "nl-BE")
+      )
+    );
+
     setFirstName("");
     setLastName("");
     setStatus("Arbeider");
+    setShowEmployees(true);
   }
 
   async function onDeactivateEmployee(id) {
@@ -342,6 +363,7 @@ export default function App() {
     setCatalogItems((prev) => [...prev, ...(data || [])]);
     setNewItemName("");
     setNewItemPoints("");
+    setShowCatalog(true);
   }
 
   async function onToggleCatalogItem(item) {
@@ -397,100 +419,92 @@ export default function App() {
   }
 
   async function onCreateOrder() {
-    if (!selectedEmployeeId || orderCart.length === 0) return;
+    if (!selectedEmployeeId) {
+      setErrorMessage("Kies eerst een werknemer.");
+      return;
+    }
+
+    if (!orderCart || orderCart.length === 0) {
+      setErrorMessage("Voeg eerst minstens 1 artikel toe aan de bestelling.");
+      return;
+    }
 
     setSavingOrder(true);
     setErrorMessage("");
 
-    const { data: orderData, error: orderError } = await supabase
-      .from("orders")
-      .insert([
-        {
-          employee_id: Number(selectedEmployeeId),
-          order_date: new Date().toISOString().slice(0, 10),
-          status: "In aanvraag",
-          note: "",
-        },
-      ])
-      .select();
-
-    if (orderError) {
-      console.log("CREATE ORDER ERROR:", orderError);
-      setSavingOrder(false);
-      setErrorMessage("Bestelling kon niet opgeslagen worden.");
-      return;
-    }
-
-    const order = orderData?.[0];
-    if (!order) {
-      setSavingOrder(false);
-      return;
-    }
-
-    const insertLines = orderCart.map((line) => ({
-      order_id: order.id,
-      item_id: line.item_id,
-      qty: Number(line.qty),
-      points_per_unit: Number(line.points_per_unit),
-    }));
-
-    const { data: lineData, error: lineError } = await supabase
-      .from("order_lines")
-      .insert(insertLines)
-      .select();
-
-    setSavingOrder(false);
-
-    if (lineError) {
-      console.log("CREATE ORDER LINES ERROR:", lineError);
-      setErrorMessage("Bestellijnen konden niet opgeslagen worden.");
-      return;
-    }
-
-    setOrdersByEmployee((prev) => {
+    try {
       const employeeId = Number(selectedEmployeeId);
-      const currentOrders = prev[employeeId] || [];
-      return {
-        ...prev,
-        [employeeId]: [
+
+      const { data: orderData, error: orderError } = await supabase
+        .from("orders")
+        .insert([
           {
-            ...order,
-            lines: lineData || [],
+            employee_id: employeeId,
+            order_date: new Date().toISOString().slice(0, 10),
+            status: "Besteld",
+            note: "",
           },
-          ...currentOrders,
-        ],
-      };
-    });
+        ])
+        .select();
 
-    setSelectedEmployeeId("");
-    setSelectedItemId("");
-    setQty(1);
-    setOrderCart([]);
-  }
+      if (orderError) {
+        console.log("CREATE ORDER ERROR:", orderError);
+        setErrorMessage("Bestelling kon niet opgeslagen worden.");
+        return;
+      }
 
-  async function onUpdateOrderStatus(orderId, employeeId, nextStatus) {
-    setErrorMessage("");
+      const order = orderData?.[0];
+      if (!order) {
+        setErrorMessage("Bestelling werd niet correct aangemaakt.");
+        return;
+      }
 
-    const { error } = await supabase
-      .from("orders")
-      .update({ status: nextStatus })
-      .eq("id", orderId);
+      const insertLines = orderCart.map((line) => ({
+        order_id: order.id,
+        item_id: Number(line.item_id),
+        qty: Number(line.qty),
+        points_per_unit: Number(line.points_per_unit),
+      }));
 
-    if (error) {
-      console.log("UPDATE ORDER STATUS ERROR:", error);
-      setErrorMessage("Bestelstatus kon niet aangepast worden.");
-      return;
+      const { data: lineData, error: lineError } = await supabase
+        .from("order_lines")
+        .insert(insertLines)
+        .select();
+
+      if (lineError) {
+        console.log("CREATE ORDER LINES ERROR:", lineError);
+        await supabase.from("orders").delete().eq("id", order.id);
+        setErrorMessage("Bestellijnen konden niet opgeslagen worden.");
+        return;
+      }
+
+      setOrdersByEmployee((prev) => {
+        const currentOrders = prev[employeeId] || [];
+        return {
+          ...prev,
+          [employeeId]: [
+            {
+              ...order,
+              lines: lineData || [],
+            },
+            ...currentOrders,
+          ],
+        };
+      });
+
+      setSelectedEmployeeId("");
+      setSelectedItemId("");
+      setQty(1);
+      setOrderCart([]);
+      setShowOrdersOverview(true);
+
+      await loadOrdersAndLines();
+    } catch (error) {
+      console.log("ON CREATE ORDER UNEXPECTED ERROR:", error);
+      setErrorMessage("Er liep iets mis bij het opslaan van de bestelling.");
+    } finally {
+      setSavingOrder(false);
     }
-
-    setOrdersByEmployee((prev) => {
-      const currentOrders = prev[employeeId] || [];
-      return {
-        ...prev,
-        [employeeId]: currentOrders.map((order) =>
-          order.id === orderId ? { ...order, status: nextStatus } : order
-        ),
-      };
-    });
   }
 
   function getItemName(itemId) {
@@ -517,21 +531,26 @@ export default function App() {
     };
   }
 
-  function statusStyle(orderStatus) {
-    const map = {
-      "In aanvraag": { background: "#dbeafe", color: "#1d4ed8" },
-      "Goedgekeurd": { background: "#dcfce7", color: "#166534" },
-      "Besteld": { background: "#fef3c7", color: "#92400e" },
-      "Geleverd": { background: "#e9d5ff", color: "#6b21a8" },
-      "Geannuleerd": { background: "#fee2e2", color: "#991b1b" },
-    };
-    return {
-      display: "inline-block",
-      padding: "4px 10px",
-      borderRadius: 999,
-      fontSize: 12,
-      ...(map[orderStatus] || { background: "#e5e7eb", color: "#111827" }),
-    };
+  function sectionHeader(title, isOpen, setOpen, extra = null) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: isOpen ? 16 : 0,
+        }}
+      >
+        <h2 style={{ margin: 0 }}>{title}</h2>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {extra}
+          <button onClick={() => setOpen(!isOpen)}>
+            {isOpen ? "Dichtvouwen" : "Openvouwen"}
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -590,259 +609,273 @@ export default function App() {
       </div>
 
       <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Nieuwe werknemer</h2>
+        {sectionHeader("Nieuwe werknemer", showNewEmployee, setShowNewEmployee)}
+        {showNewEmployee ? (
+          <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
+            <div>
+              <label>Voornaam</label>
+              <input value={firstName} onChange={(e) => setFirstName(e.target.value)} style={inputStyle()} />
+            </div>
 
-        <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
-          <div>
-            <label>Voornaam</label>
-            <input
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              style={inputStyle()}
-            />
-          </div>
+            <div>
+              <label>Achternaam</label>
+              <input value={lastName} onChange={(e) => setLastName(e.target.value)} style={inputStyle()} />
+            </div>
 
-          <div>
-            <label>Achternaam</label>
-            <input
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              style={inputStyle()}
-            />
-          </div>
+            <div>
+              <label>Statuut</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} style={inputStyle()}>
+                <option value="Arbeider">Arbeider</option>
+                <option value="Bediende">Bediende</option>
+              </select>
+            </div>
 
-          <div>
-            <label>Statuut</label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              style={inputStyle()}
-            >
-              <option value="Arbeider">Arbeider</option>
-              <option value="Bediende">Bediende</option>
-            </select>
+            <div>
+              <button onClick={onAddEmployee} disabled={savingEmployee}>
+                {savingEmployee ? "Opslaan..." : "Werknemer toevoegen"}
+              </button>
+            </div>
           </div>
-
-          <div>
-            <button onClick={onAddEmployee} disabled={savingEmployee}>
-              {savingEmployee ? "Opslaan..." : "Werknemer toevoegen"}
-            </button>
-          </div>
-        </div>
+        ) : null}
       </div>
 
       <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Nieuwe bestelling</h2>
-
-        <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-          <div>
-            <label>Werknemer</label>
-            <select
-              value={selectedEmployeeId}
-              onChange={(e) => setSelectedEmployeeId(e.target.value)}
-              style={inputStyle()}
-            >
-              <option value="">Kies werknemer</option>
-              {employeesWithStats
-                .filter((employee) => employee.active)
-                .map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.full_name} ({employee.remaining} pt)
-                  </option>
-                ))}
-            </select>
-          </div>
-
-          <div>
-            <label>Artikel</label>
-            <select
-              value={selectedItemId}
-              onChange={(e) => setSelectedItemId(e.target.value)}
-              style={inputStyle()}
-            >
-              <option value="">Kies artikel</option>
-              {activeCatalogItems.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} ({item.points} pt)
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label>Aantal</label>
-            <input
-              type="number"
-              min="1"
-              value={qty}
-              onChange={(e) => setQty(Number(e.target.value))}
-              style={inputStyle()}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={onAddLineToCart}>Artikel toevoegen aan bestelling</button>
-            <button
-              onClick={onCreateOrder}
-              disabled={savingOrder || !selectedEmployeeId || orderCart.length === 0}
-            >
-              {savingOrder ? "Opslaan..." : "Volledige bestelling opslaan"}
-            </button>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 20 }}>
-          <h3>Bestellijnen</h3>
-          {orderCart.length === 0 ? (
-            <div>Nog geen artikels toegevoegd.</div>
-          ) : (
-            <div>
-              {orderCart.map((line) => (
-                <div
-                  key={line.tempId}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    borderBottom: "1px solid #eee",
-                    padding: "8px 0",
-                    gap: 12,
-                  }}
+        {sectionHeader("Nieuwe bestelling", showNewOrder, setShowNewOrder)}
+        {showNewOrder ? (
+          <>
+            <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
+              <div>
+                <label>Werknemer</label>
+                <select
+                  value={selectedEmployeeId}
+                  onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                  style={inputStyle()}
                 >
-                  <div>
-                    {line.item_name} - {line.qty} x {line.points_per_unit} pt ={" "}
-                    {line.qty * line.points_per_unit} pt
-                  </div>
-                  <button onClick={() => onRemoveLineFromCart(line.tempId)}>
-                    Verwijderen
-                  </button>
-                </div>
-              ))}
-              <div style={{ marginTop: 12, fontWeight: 700 }}>
-                Totaal: {currentOrderTotal} pt
+                  <option value="">Kies werknemer</option>
+                  {employeesWithStats
+                    .filter((employee) => employee.active)
+                    .map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.full_name} ({employee.remaining} pt)
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Artikel</label>
+                <select
+                  value={selectedItemId}
+                  onChange={(e) => setSelectedItemId(e.target.value)}
+                  style={inputStyle()}
+                >
+                  <option value="">Kies artikel</option>
+                  {activeCatalogItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} ({item.points} pt)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Aantal</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={qty}
+                  onChange={(e) => setQty(Number(e.target.value))}
+                  style={inputStyle()}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={onAddLineToCart}>Artikel toevoegen aan bestelling</button>
+                <button
+                  onClick={onCreateOrder}
+                  disabled={savingOrder || !selectedEmployeeId || orderCart.length === 0}
+                >
+                  {savingOrder ? "Opslaan..." : "Volledige bestelling opslaan"}
+                </button>
               </div>
             </div>
-          )}
-        </div>
+
+            {selectedOrderEmployee ? (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 12,
+                  borderRadius: 8,
+                  background:
+                    projectedRemaining !== null && projectedRemaining < 0
+                      ? "#fee2e2"
+                      : "#eff6ff",
+                  color:
+                    projectedRemaining !== null && projectedRemaining < 0
+                      ? "#991b1b"
+                      : "#1d4ed8",
+                }}
+              >
+                <div>
+                  <strong>Huidig saldo:</strong> {selectedOrderEmployee.remaining} pt
+                </div>
+                <div>
+                  <strong>Bestelling in mandje:</strong> {currentOrderTotal} pt
+                </div>
+                <div>
+                  <strong>Saldo na bestelling:</strong>{" "}
+                  {projectedRemaining !== null ? projectedRemaining : "-"} pt
+                </div>
+                {projectedRemaining !== null && projectedRemaining < 0 ? (
+                  <div style={{ marginTop: 8, fontWeight: 700 }}>
+                    Waarschuwing: deze bestelling gaat boven het beschikbare saldo.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 20 }}>
+              <h3>Bestellijnen</h3>
+              {orderCart.length === 0 ? (
+                <div>Nog geen artikels toegevoegd.</div>
+              ) : (
+                <div>
+                  {orderCart.map((line) => (
+                    <div
+                      key={line.tempId}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        borderBottom: "1px solid #eee",
+                        padding: "8px 0",
+                        gap: 12,
+                      }}
+                    >
+                      <div>
+                        {line.item_name} - {line.qty} x {line.points_per_unit} pt ={" "}
+                        {line.qty * line.points_per_unit} pt
+                      </div>
+                      <button onClick={() => onRemoveLineFromCart(line.tempId)}>
+                        Verwijderen
+                      </button>
+                    </div>
+                  ))}
+                  <div style={{ marginTop: 12, fontWeight: 700 }}>
+                    Totaal: {currentOrderTotal} pt
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        ) : null}
       </div>
 
       <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Nieuw artikel</h2>
+        {sectionHeader("Nieuw artikel", showNewItem, setShowNewItem)}
+        {showNewItem ? (
+          <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
+            <div>
+              <label>Artikelnaam</label>
+              <input value={newItemName} onChange={(e) => setNewItemName(e.target.value)} style={inputStyle()} />
+            </div>
 
-        <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
-          <div>
-            <label>Artikelnaam</label>
-            <input
-              value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-              style={inputStyle()}
-            />
-          </div>
+            <div>
+              <label>Punten</label>
+              <input type="number" value={newItemPoints} onChange={(e) => setNewItemPoints(e.target.value)} style={inputStyle()} />
+            </div>
 
-          <div>
-            <label>Punten</label>
-            <input
-              type="number"
-              value={newItemPoints}
-              onChange={(e) => setNewItemPoints(e.target.value)}
-              style={inputStyle()}
-            />
+            <div>
+              <button onClick={onAddCatalogItem} disabled={savingItem}>
+                {savingItem ? "Opslaan..." : "Artikel toevoegen"}
+              </button>
+            </div>
           </div>
-
-          <div>
-            <button onClick={onAddCatalogItem} disabled={savingItem}>
-              {savingItem ? "Opslaan..." : "Artikel toevoegen"}
-            </button>
-          </div>
-        </div>
+        ) : null}
       </div>
 
       <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Zoek en filter werknemers</h2>
-
-        <div
-          style={{
-            display: "grid",
-            gap: 12,
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          }}
-        >
-          <div>
-            <label>Zoek op naam</label>
-            <input
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="bv. Meeus of Janssens"
-              style={inputStyle()}
-            />
-          </div>
-
-          <div>
-            <label>Filter op statuut</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={inputStyle()}
-            >
-              <option value="all">Alle statuten</option>
-              <option value="Arbeider">Arbeider</option>
-              <option value="Bediende">Bediende</option>
-            </select>
-          </div>
-
-          <div>
-            <label>Filter op status</label>
-            <select
-              value={activeFilter}
-              onChange={(e) => setActiveFilter(e.target.value)}
-              style={inputStyle()}
-            >
-              <option value="active">Alleen actief</option>
-              <option value="inactive">Alleen inactief</option>
-              <option value="all">Alles</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Werknemers</h2>
-        {loadingEmployees ? <div>Werknemers laden...</div> : null}
-        <div style={{ marginBottom: 12 }}>
-          {filteredEmployees.length} werknemer(s) gevonden
-        </div>
-
-        {filteredEmployees.map((employee) => (
+        {sectionHeader("Zoek en filter werknemers", showSearchFilter, setShowSearchFilter)}
+        {showSearchFilter ? (
           <div
-            key={employee.id}
             style={{
-              padding: 12,
-              borderBottom: "1px solid #eee",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
+              display: "grid",
               gap: 12,
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
             }}
           >
             <div>
-              <strong>{employee.full_name}</strong> ({employee.status}) - budget{" "}
-              {employee.budget} / verbruikt {employee.spent} / saldo{" "}
-              {employee.remaining}
-              {!employee.active && <span> - inactief</span>}
+              <label>Zoek op naam</label>
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="bv. Meeus of Janssens"
+                style={inputStyle()}
+              />
             </div>
 
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setDetailEmployeeId(employee.id)}>
-                Detail
-              </button>
-              {employee.active ? (
-                <button onClick={() => onDeactivateEmployee(employee.id)}>
-                  Inactief zetten
-                </button>
-              ) : null}
+            <div>
+              <label>Filter op statuut</label>
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={inputStyle()}>
+                <option value="all">Alle statuten</option>
+                <option value="Arbeider">Arbeider</option>
+                <option value="Bediende">Bediende</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Filter op status</label>
+              <select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)} style={inputStyle()}>
+                <option value="active">Alleen actief</option>
+                <option value="inactive">Alleen inactief</option>
+                <option value="all">Alles</option>
+              </select>
             </div>
           </div>
-        ))}
+        ) : null}
+      </div>
+
+      <div style={blockStyle()}>
+        {sectionHeader(
+          "Werknemers",
+          showEmployees,
+          setShowEmployees,
+          <span>{filteredEmployees.length} gevonden</span>
+        )}
+        {showEmployees ? (
+          <>
+            {loadingEmployees ? <div>Werknemers laden...</div> : null}
+            {filteredEmployees.map((employee) => (
+              <div
+                key={employee.id}
+                style={{
+                  padding: 12,
+                  borderBottom: "1px solid #eee",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <strong>{employee.full_name}</strong> ({employee.status}) - budget{" "}
+                  {employee.budget} / verbruikt {employee.spent} / saldo{" "}
+                  {employee.remaining}
+                  {!employee.active && <span> - inactief</span>}
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setDetailEmployeeId(employee.id)}>Detail</button>
+                  {employee.active ? (
+                    <button onClick={() => onDeactivateEmployee(employee.id)}>
+                      Inactief zetten
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </>
+        ) : null}
       </div>
 
       {selectedEmployee ? (
@@ -859,21 +892,11 @@ export default function App() {
               marginBottom: 20,
             }}
           >
-            <div>
-              <strong>Statuut:</strong> {selectedEmployee.status}
-            </div>
-            <div>
-              <strong>Budget:</strong> {selectedEmployee.budget}
-            </div>
-            <div>
-              <strong>Historisch verbruikt:</strong> {selectedEmployee.opening_spent || 0}
-            </div>
-            <div>
-              <strong>Totaal verbruikt:</strong> {selectedEmployee.spent}
-            </div>
-            <div>
-              <strong>Saldo:</strong> {selectedEmployee.remaining}
-            </div>
+            <div><strong>Statuut:</strong> {selectedEmployee.status}</div>
+            <div><strong>Budget:</strong> {selectedEmployee.budget}</div>
+            <div><strong>Historisch verbruikt:</strong> {selectedEmployee.opening_spent || 0}</div>
+            <div><strong>Totaal verbruikt:</strong> {selectedEmployee.spent}</div>
+            <div><strong>Saldo:</strong> {selectedEmployee.remaining}</div>
           </div>
 
           <div style={{ maxWidth: 320, marginBottom: 20 }}>
@@ -894,7 +917,7 @@ export default function App() {
 
           <h3>Bestellingen</h3>
           {(ordersByEmployee[selectedEmployee.id] || []).length === 0 ? (
-            <div>Geen nieuwe bestellingen voor deze werknemer.</div>
+            <div>Geen bestellingen voor deze werknemer.</div>
           ) : (
             (ordersByEmployee[selectedEmployee.id] || []).map((order) => (
               <div
@@ -903,36 +926,18 @@ export default function App() {
                   borderTop: "1px solid #eee",
                   paddingTop: 10,
                   marginTop: 10,
-                  opacity: order.status === "Geannuleerd" ? 0.6 : 1,
                 }}
               >
                 <div style={{ marginBottom: 6 }}>
                   <strong>Datum:</strong> {order.order_date}
                 </div>
                 <div style={{ marginBottom: 6 }}>
-                  <strong>Status:</strong>{" "}
-                  <span style={statusStyle(order.status)}>{order.status}</span>
+                  <strong>Status:</strong> {order.status}
                 </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                  {ORDER_STATUSES.map((nextStatus) => (
-                    <button
-                      key={nextStatus}
-                      onClick={() =>
-                        onUpdateOrderStatus(order.id, selectedEmployee.id, nextStatus)
-                      }
-                      disabled={order.status === nextStatus}
-                    >
-                      {nextStatus}
-                    </button>
-                  ))}
-                </div>
-
                 <ul>
                   {(order.lines || []).map((line) => (
                     <li key={line.id}>
-                      {getItemName(line.item_id)} - {line.qty} x{" "}
-                      {line.points_per_unit} pt
+                      {getItemName(line.item_id)} - {line.qty} x {line.points_per_unit} pt
                     </li>
                   ))}
                 </ul>
@@ -943,96 +948,85 @@ export default function App() {
       ) : null}
 
       <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Catalogus</h2>
-        {loadingCatalog ? <div>Catalogus laden...</div> : null}
-        {catalogItems.map((item) => (
-          <div
-            key={item.id}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              padding: "8px 0",
-              borderBottom: "1px solid #eee",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
-            </div>
-            <button onClick={() => onToggleCatalogItem(item)}>
-              {item.active ? "Inactief zetten" : "Activeren"}
-            </button>
-          </div>
-        ))}
+        {sectionHeader("Catalogus", showCatalog, setShowCatalog)}
+        {showCatalog ? (
+          <>
+            {loadingCatalog ? <div>Catalogus laden...</div> : null}
+            {catalogItems.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "8px 0",
+                  borderBottom: "1px solid #eee",
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
+                </div>
+                <button onClick={() => onToggleCatalogItem(item)}>
+                  {item.active ? "Inactief zetten" : "Activeren"}
+                </button>
+              </div>
+            ))}
+          </>
+        ) : null}
       </div>
 
       <div style={blockStyle()}>
-        <h2 style={{ marginTop: 0 }}>Bestellingen per werknemer</h2>
-        {loadingOrders ? <div>Bestellingen laden...</div> : null}
+        {sectionHeader("Bestellingen per werknemer", showOrdersOverview, setShowOrdersOverview)}
+        {showOrdersOverview ? (
+          <>
+            {loadingOrders ? <div>Bestellingen laden...</div> : null}
+            {employeesWithStats.map((employee) => {
+              const employeeOrders = ordersByEmployee[employee.id] || [];
+              if (employeeOrders.length === 0) return null;
 
-        {employeesWithStats.map((employee) => {
-          const employeeOrders = ordersByEmployee[employee.id] || [];
-          if (employeeOrders.length === 0) return null;
-
-          return (
-            <div
-              key={employee.id}
-              style={{
-                border: "1px solid #eee",
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 12,
-                background: "#fff",
-              }}
-            >
-              <h3 style={{ marginTop: 0 }}>{employee.full_name}</h3>
-
-              {employeeOrders.map((order) => (
+              return (
                 <div
-                  key={order.id}
+                  key={employee.id}
                   style={{
-                    borderTop: "1px solid #eee",
-                    paddingTop: 10,
-                    marginTop: 10,
-                    opacity: order.status === "Geannuleerd" ? 0.6 : 1,
+                    border: "1px solid #eee",
+                    borderRadius: 8,
+                    padding: 12,
+                    marginBottom: 12,
+                    background: "#fff",
                   }}
                 >
-                  <div style={{ marginBottom: 6 }}>
-                    <strong>Datum:</strong> {order.order_date}
-                  </div>
-                  <div style={{ marginBottom: 6 }}>
-                    <strong>Status:</strong>{" "}
-                    <span style={statusStyle(order.status)}>{order.status}</span>
-                  </div>
+                  <h3 style={{ marginTop: 0 }}>{employee.full_name}</h3>
 
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                    {ORDER_STATUSES.map((nextStatus) => (
-                      <button
-                        key={nextStatus}
-                        onClick={() =>
-                          onUpdateOrderStatus(order.id, employee.id, nextStatus)
-                        }
-                        disabled={order.status === nextStatus}
-                      >
-                        {nextStatus}
-                      </button>
-                    ))}
-                  </div>
-
-                  <ul>
-                    {(order.lines || []).map((line) => (
-                      <li key={line.id}>
-                        {getItemName(line.item_id)} - {line.qty} x{" "}
-                        {line.points_per_unit} pt
-                      </li>
-                    ))}
-                  </ul>
+                  {employeeOrders.map((order) => (
+                    <div
+                      key={order.id}
+                      style={{
+                        borderTop: "1px solid #eee",
+                        paddingTop: 10,
+                        marginTop: 10,
+                      }}
+                    >
+                      <div style={{ marginBottom: 6 }}>
+                        <strong>Datum:</strong> {order.order_date}
+                      </div>
+                      <div style={{ marginBottom: 6 }}>
+                        <strong>Status:</strong> {order.status}
+                      </div>
+                      <ul>
+                        {(order.lines || []).map((line) => (
+                          <li key={line.id}>
+                            {getItemName(line.item_id)} - {line.qty} x {line.points_per_unit} pt
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          );
-        })}
+              );
+            })}
+          </>
+        ) : null}
       </div>
     </div>
   );
