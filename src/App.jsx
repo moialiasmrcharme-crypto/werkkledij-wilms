@@ -44,6 +44,7 @@ export default function App() {
 
   const COLORS = {
     navy: "#1f2a44",
+    navy2: "#2d3f63",
     yellow: "#f2c300",
     yellowSoft: "#fff6cc",
     bg: "#f5f7fb",
@@ -55,8 +56,6 @@ export default function App() {
     dangerText: "#991b1b",
     infoBg: "#eef4ff",
     infoText: "#1d4ed8",
-    successBg: "#ecfdf3",
-    successText: "#166534",
   };
 
   const activeCatalogItems = useMemo(
@@ -659,29 +658,46 @@ export default function App() {
     >
       <div
         style={{
-          background: `linear-gradient(135deg, ${COLORS.navy} 0%, #2e3e63 100%)`,
+          background: `linear-gradient(135deg, ${COLORS.navy} 0%, ${COLORS.navy2} 100%)`,
           color: "#fff",
           borderRadius: 18,
           padding: 20,
           marginBottom: 20,
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          flexWrap: "wrap",
         }}
       >
-        <div
+        <img
+          src="/wilms-logo.png"
+          alt="Wilms"
           style={{
-            display: "inline-block",
-            background: COLORS.yellow,
-            color: COLORS.navy,
-            fontWeight: 800,
-            padding: "6px 12px",
-            borderRadius: 999,
-            marginBottom: 10,
+            height: 54,
+            width: "auto",
+            background: "#fff",
+            padding: 8,
+            borderRadius: 12,
           }}
-        >
-          Werkkledijbeheer
-        </div>
-        <h1 style={{ margin: 0, fontSize: 30 }}>Werkkledij Wilms</h1>
-        <div style={{ marginTop: 6, opacity: 0.9 }}>
-          Beheer werknemers, punten en bestellingen op één plek
+        />
+        <div>
+          <div
+            style={{
+              display: "inline-block",
+              background: COLORS.yellow,
+              color: COLORS.navy,
+              fontWeight: 800,
+              padding: "6px 12px",
+              borderRadius: 999,
+              marginBottom: 10,
+            }}
+          >
+            Werkkledijbeheer
+          </div>
+          <h1 style={{ margin: 0, fontSize: 30 }}>Werkkledij Wilms</h1>
+          <div style={{ marginTop: 6, opacity: 0.9 }}>
+            Beheer werknemers, punten en bestellingen op één plek
+          </div>
         </div>
       </div>
 
