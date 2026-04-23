@@ -1,304 +1,1185 @@
-import React, { useMemo, useState } from 'react'
-import * as XLSX from 'xlsx'
+import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "./lib/supabase";
 
-const catalog = [
-  { id: 1, name: 'Blauwe vest', points: 40, excelHeader: 'Blauwe vest - 40' },
-  { id: 2, name: 'Bodywarmer', points: 40, excelHeader: 'Bodywarmer - 40' },
-  { id: 3, name: 'Broek (lang)', points: 70, excelHeader: 'Broek (lang) - 70' },
-  { id: 4, name: 'Fleece', points: 20, excelHeader: 'Fleece - 20' },
-  { id: 5, name: 'Jas', points: 80, excelHeader: 'Jas - 80' },
-  { id: 6, name: 'Korte short', points: 80, excelHeader: 'Korte short - 80' },
-  { id: 7, name: 'Lange short', points: 50, excelHeader: 'Lange short - 50' },
-  { id: 8, name: 'Polo', points: 0, excelHeader: 'Polo - 0' },
-  { id: 9, name: 'Schoenen', points: 70, excelHeader: 'Schoenen - 70' },
-  { id: 10, name: 'Sokken (1 paar)', points: 10, excelHeader: 'Sokken (1 paar) - 10' },
-  { id: 11, name: 'Sweater', points: 20, excelHeader: 'Sweater - 20' },
-  { id: 12, name: 'T-shirt', points: 0, excelHeader: 'T-shirt - 0' },
-  { id: 13, name: 'T-shirt premium', points: 1, excelHeader: 'T-shirt - 1' },
-]
+export default function App() {
+  const [employees, setEmployees] = useState([]);
+  const [catalogItems, setCatalogItems] = useState([]);
+  const [ordersByEmployee, setOrdersByEmployee] = useState({});
 
-const demoEmployees = [
-  { id: 1, fullName: 'Meeus Mark', status: 'Bediende', basePoints: 40, extraPoints: 20, importedSpent: 60, importedRemaining: 0, orders: [{ id: 1, date: '2026-01-01', status: 'Geïmporteerd', items: [{ itemId: 1, qty: 1 }, { itemId: 11, qty: 1 }] }] },
-  { id: 2, fullName: 'Peeters An', status: 'Arbeider', basePoints: 300, extraPoints: 0, importedSpent: 210, importedRemaining: 90, orders: [{ id: 2, date: '2026-01-01', status: 'Geïmporteerd', items: [{ itemId: 3, qty: 2 }, { itemId: 9, qty: 1 }] }] },
-]
+  const [loadingEmployees, setLoadingEmployees] = useState(true);
+  const [loadingCatalog, setLoadingCatalog] = useState(true);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
-function toNumber(value) {
-  if (value === null || value === undefined || value === '') return 0
-  if (typeof value === 'number') return value
-  const parsed = Number(String(value).replace(',', '.').trim())
-  return Number.isFinite(parsed) ? parsed : 0
-}
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [status, setStatus] = useState("Arbeider");
+  const [savingEmployee, setSavingEmployee] = useState(false);
 
-function getItem(itemId) {
-  return catalog.find((item) => item.id === itemId)
-}
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [selectedItemId, setSelectedItemId] = useState("");
+  const [qty, setQty] = useState(1);
+  const [orderCart, setOrderCart] = useState([]);
+  const [savingOrder, setSavingOrder] = useState(false);
 
-function calcSpent(orders = []) {
-  return orders.reduce((total, order) => total + order.items.reduce((sum, line) => sum + (getItem(line.itemId)?.points || 0) * line.qty, 0), 0)
-}
+  const [newItemName, setNewItemName] = useState("");
+  const [newItemPoints, setNewItemPoints] = useState("");
+  const [savingItem, setSavingItem] = useState(false);
 
-function calcEmployee(employee) {
-  const budget = (employee.basePoints || 0) + (employee.extraPoints || 0)
-  const spent = employee.importedSpent ?? calcSpent(employee.orders)
-  const remaining = employee.importedRemaining ?? (budget - spent)
-  return { ...employee, budget, spent, remaining }
-}
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [activeFilter, setActiveFilter] = useState("active");
 
-function formatOrderItems(items) {
-  return items.map((line) => `${getItem(line.itemId)?.name || 'Onbekend'} x${line.qty}`).join(', ')
-}
+  const [detailEmployeeId, setDetailEmployeeId] = useState(null);
+  const [extraPointsInput, setExtraPointsInput] = useState("");
+  const [savingExtraPoints, setSavingExtraPoints] = useState(false);
 
-function parseEmployeesFromWorkbook(buffer) {
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
-  const sheet = workbook.Sheets['INVOER']
-  if (!sheet) throw new Error("Het werkblad 'INVOER' werd niet gevonden.")
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
-  const employees = rows
-    .filter((row) => row['Achternaam'] || row['Voornaam'])
-    .map((row, index) => {
-      const status = row['Statuut'] || 'Bediende'
-      const basePoints = status === 'Arbeider' ? 300 : 40
-      const extraPoints = toNumber(row['EXTRA punten'])
-      const orderItems = catalog.map((item) => ({ itemId: item.id, qty: toNumber(row[item.excelHeader]) })).filter((line) => line.qty > 0)
-      const importedSpent = row['Verbruikt'] === '' ? null : toNumber(row['Verbruikt'])
-      const importedRemaining = row['Resterend'] === '' ? null : toNumber(row['Resterend'])
-      return {
-        id: index + 1,
-        fullName: String(row['Naam + Voornaam'] || `${row['Achternaam'] || ''} ${row['Voornaam'] || ''}`).trim(),
-        status,
-        basePoints,
-        extraPoints,
-        importedSpent,
-        importedRemaining,
-        orders: orderItems.length ? [{ id: `import-${index + 1}`, date: '2026-01-01', status: 'Geïmporteerd uit Excel', items: orderItems }] : [],
-      }
-    })
-  return { employees, rowCount: employees.length }
-}
+  const [showNewEmployee, setShowNewEmployee] = useState(true);
+  const [showNewOrder, setShowNewOrder] = useState(true);
+  const [showNewItem, setShowNewItem] = useState(false);
+  const [showSearchFilter, setShowSearchFilter] = useState(true);
+  const [showEmployees, setShowEmployees] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [showOrdersOverview, setShowOrdersOverview] = useState(false);
 
-const styles = {
-  app: { minHeight: '100vh', background: '#f8fafc', color: '#0f172a', fontFamily: 'Arial, sans-serif' },
-  wrap: { maxWidth: 1100, margin: '0 auto', padding: 16 },
-  card: { background: '#fff', borderRadius: 18, padding: 18, boxShadow: '0 1px 8px rgba(0,0,0,0.08)', marginBottom: 16 },
-  title: { fontSize: 28, fontWeight: 700, margin: '0 0 6px' },
-  muted: { color: '#475569' },
-  button: { border: 0, borderRadius: 12, padding: '12px 16px', background: '#0f172a', color: '#fff', cursor: 'pointer' },
-  buttonLight: { border: '1px solid #cbd5e1', borderRadius: 12, padding: '12px 16px', background: '#fff', color: '#0f172a', cursor: 'pointer' },
-  input: { width: '100%', padding: 12, borderRadius: 12, border: '1px solid #cbd5e1', boxSizing: 'border-box' },
-  select: { width: '100%', padding: 12, borderRadius: 12, border: '1px solid #cbd5e1', boxSizing: 'border-box', background: '#fff' },
-  grid2: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 },
-  grid3: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 },
-  stat: { background: '#fff', borderRadius: 18, padding: 16, boxShadow: '0 1px 8px rgba(0,0,0,0.08)' },
-  statValue: { fontSize: 26, fontWeight: 700, margin: '6px 0' },
-  table: { width: '100%', borderCollapse: 'collapse' },
-  th: { textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #e2e8f0', fontSize: 14 },
-  td: { padding: '10px 8px', borderBottom: '1px solid #e2e8f0', fontSize: 14, verticalAlign: 'top' },
-  badge: { display: 'inline-block', padding: '4px 8px', borderRadius: 999, background: '#e2e8f0', fontSize: 12 },
-}
+  const ORDER_STATUSES = [
+    "In aanvraag",
+    "Goedgekeurd",
+    "Besteld",
+    "Geleverd",
+    "Geannuleerd",
+  ];
 
-function App() {
-  const [session, setSession] = useState(null)
-  const [employees, setEmployees] = useState(demoEmployees)
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState('1')
-  const [importMeta, setImportMeta] = useState(null)
-  const [importError, setImportError] = useState('')
-  const [itemId, setItemId] = useState('1')
-  const [qty, setQty] = useState(1)
+  const activeCatalogItems = useMemo(
+    () => catalogItems.filter((item) => item.active),
+    [catalogItems]
+  );
 
-  const enriched = useMemo(() => employees.map(calcEmployee), [employees])
-  const selectedEmployee = enriched.find((employee) => String(employee.id) === String(selectedEmployeeId)) || enriched[0]
-  const totals = useMemo(() => {
-    const totalBudget = enriched.reduce((sum, e) => sum + e.budget, 0)
-    const totalSpent = enriched.reduce((sum, e) => sum + e.spent, 0)
-    return { totalBudget, totalSpent, totalRemaining: totalBudget - totalSpent }
-  }, [enriched])
+  const employeesWithStats = useMemo(() => {
+    return employees.map((employee) => {
+      const basePoints = employee.status === "Arbeider" ? 300 : 40;
+      const extraPoints = employee.extra_points || 0;
+      const budget = Math.min(500, basePoints + extraPoints);
 
-  const handleImport = async (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    try {
-      const parsed = parseEmployeesFromWorkbook(await file.arrayBuffer())
-      setEmployees(parsed.employees)
-      setSelectedEmployeeId(String(parsed.employees[0]?.id || '1'))
-      setImportMeta({ fileName: file.name, rowCount: parsed.rowCount })
-      setImportError('')
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Import mislukt.')
-    }
-    event.target.value = ''
-  }
+      const orders = ordersByEmployee[employee.id] || [];
+      const newSpent = orders.reduce((sum, order) => {
+        if (order.status === "Geannuleerd") return sum;
+        return (
+          sum +
+          (order.lines || []).reduce(
+            (lineSum, line) => lineSum + line.qty * line.points_per_unit,
+            0
+          )
+        );
+      }, 0);
 
-  const addOrder = () => {
-    setEmployees((current) => current.map((employee) => {
-      if (String(employee.id) !== String(selectedEmployeeId)) return employee
-      const added = (getItem(Number(itemId))?.points || 0) * qty
-      const spent = employee.importedSpent ?? calcSpent(employee.orders)
-      const remaining = employee.importedRemaining ?? ((employee.basePoints + employee.extraPoints) - spent)
+      const openingSpent = employee.opening_spent || 0;
+      const spent = openingSpent + newSpent;
+
       return {
         ...employee,
-        importedSpent: spent + added,
-        importedRemaining: remaining - added,
-        orders: [{ id: Date.now(), date: new Date().toISOString().slice(0, 10), status: 'In aanvraag', items: [{ itemId: Number(itemId), qty }] }, ...(employee.orders || [])],
-      }
-    }))
+        budget,
+        spent,
+        remaining: budget - spent,
+      };
+    });
+  }, [employees, ordersByEmployee]);
+
+  const filteredEmployees = useMemo(() => {
+    let result = [...employeesWithStats];
+
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase().trim();
+      result = result.filter((employee) =>
+        (employee.full_name || "").toLowerCase().includes(search)
+      );
+    }
+
+    if (statusFilter !== "all") {
+      result = result.filter((employee) => employee.status === statusFilter);
+    }
+
+    if (activeFilter === "active") {
+      result = result.filter((employee) => employee.active);
+    } else if (activeFilter === "inactive") {
+      result = result.filter((employee) => !employee.active);
+    }
+
+    result.sort((a, b) =>
+      (a.full_name || "").localeCompare(b.full_name || "", "nl-BE")
+    );
+
+    return result;
+  }, [employeesWithStats, searchTerm, statusFilter, activeFilter]);
+
+  const selectedEmployee = useMemo(() => {
+    return (
+      employeesWithStats.find((employee) => employee.id === Number(detailEmployeeId)) ||
+      null
+    );
+  }, [employeesWithStats, detailEmployeeId]);
+
+  const selectedOrderEmployee = useMemo(() => {
+    return (
+      employeesWithStats.find(
+        (employee) => employee.id === Number(selectedEmployeeId)
+      ) || null
+    );
+  }, [employeesWithStats, selectedEmployeeId]);
+
+  const dashboardStats = useMemo(() => {
+    const activeEmployees = employeesWithStats.filter((employee) => employee.active);
+    const totalBudget = activeEmployees.reduce((sum, employee) => sum + employee.budget, 0);
+    const totalSpent = activeEmployees.reduce((sum, employee) => sum + employee.spent, 0);
+    const totalRemaining = activeEmployees.reduce((sum, employee) => sum + employee.remaining, 0);
+    const totalOrders = Object.values(ordersByEmployee).reduce(
+      (sum, employeeOrders) => sum + employeeOrders.length,
+      0
+    );
+
+    return {
+      activeEmployees: activeEmployees.length,
+      totalBudget,
+      totalSpent,
+      totalRemaining,
+      totalOrders,
+    };
+  }, [employeesWithStats, ordersByEmployee]);
+
+  const currentOrderTotal = useMemo(() => {
+    return orderCart.reduce(
+      (sum, line) => sum + line.qty * line.points_per_unit,
+      0
+    );
+  }, [orderCart]);
+
+  const projectedRemaining = useMemo(() => {
+    if (!selectedOrderEmployee) return null;
+    return selectedOrderEmployee.remaining - currentOrderTotal;
+  }, [selectedOrderEmployee, currentOrderTotal]);
+
+  async function loadEmployees() {
+    setLoadingEmployees(true);
+    setErrorMessage("");
+
+    const { data, error } = await supabase
+      .from("employees")
+      .select("*")
+      .order("full_name", { ascending: true });
+
+    setLoadingEmployees(false);
+
+    if (error) {
+      console.log("LOAD EMPLOYEES ERROR:", error);
+      setErrorMessage("Werknemers konden niet geladen worden.");
+      return;
+    }
+
+    setEmployees(data || []);
   }
 
-  if (!session) {
+  async function loadCatalog() {
+    setLoadingCatalog(true);
+    setErrorMessage("");
+
+    const { data, error } = await supabase
+      .from("catalog_items")
+      .select("*")
+      .order("id", { ascending: true });
+
+    setLoadingCatalog(false);
+
+    if (error) {
+      console.log("LOAD CATALOG ERROR:", error);
+      setErrorMessage("Catalogus kon niet geladen worden.");
+      return;
+    }
+
+    setCatalogItems(data || []);
+  }
+
+  async function loadOrdersAndLines() {
+    setLoadingOrders(true);
+
+    const { data: orders, error: ordersError } = await supabase
+      .from("orders")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (ordersError) {
+      console.log("LOAD ORDERS ERROR:", ordersError);
+      setLoadingOrders(false);
+      setErrorMessage("Bestellingen konden niet geladen worden.");
+      return;
+    }
+
+    const { data: lines, error: linesError } = await supabase
+      .from("order_lines")
+      .select("*")
+      .order("id", { ascending: true });
+
+    setLoadingOrders(false);
+
+    if (linesError) {
+      console.log("LOAD ORDER LINES ERROR:", linesError);
+      setErrorMessage("Bestellijnen konden niet geladen worden.");
+      return;
+    }
+
+    const grouped = {};
+    (orders || []).forEach((order) => {
+      const employeeId = order.employee_id;
+      if (!grouped[employeeId]) grouped[employeeId] = [];
+      grouped[employeeId].push({
+        ...order,
+        lines: (lines || []).filter((line) => line.order_id === order.id),
+      });
+    });
+
+    setOrdersByEmployee(grouped);
+  }
+
+  useEffect(() => {
+    async function init() {
+      await Promise.all([loadEmployees(), loadCatalog(), loadOrdersAndLines()]);
+    }
+    init();
+  }, []);
+
+  async function onAddEmployee() {
+    if (!firstName.trim() || !lastName.trim()) return;
+
+    setSavingEmployee(true);
+    setErrorMessage("");
+
+    const payload = {
+      first_name: firstName.trim(),
+      last_name: lastName.trim(),
+      full_name: `${lastName.trim()} ${firstName.trim()}`,
+      email: "",
+      status,
+      active: true,
+      extra_points: 0,
+      opening_spent: 0,
+    };
+
+    const { data, error } = await supabase
+      .from("employees")
+      .insert([payload])
+      .select();
+
+    setSavingEmployee(false);
+
+    if (error) {
+      console.log("ADD EMPLOYEE ERROR:", error);
+      setErrorMessage("Werknemer kon niet toegevoegd worden.");
+      return;
+    }
+
+    setEmployees((prev) =>
+      [...prev, ...(data || [])].sort((a, b) =>
+        (a.full_name || "").localeCompare(b.full_name || "", "nl-BE")
+      )
+    );
+
+    setFirstName("");
+    setLastName("");
+    setStatus("Arbeider");
+    setShowEmployees(true);
+  }
+
+  async function onDeactivateEmployee(id) {
+    setErrorMessage("");
+
+    const { error } = await supabase
+      .from("employees")
+      .update({ active: false })
+      .eq("id", id);
+
+    if (error) {
+      console.log("DEACTIVATE EMPLOYEE ERROR:", error);
+      setErrorMessage("Werknemer kon niet inactief gezet worden.");
+      return;
+    }
+
+    setEmployees((prev) =>
+      prev.map((employee) =>
+        employee.id === id ? { ...employee, active: false } : employee
+      )
+    );
+  }
+
+  async function onAddExtraPoints() {
+    if (!selectedEmployee || !extraPointsInput) return;
+
+    const pointsToAdd = Number(extraPointsInput);
+    if (!Number.isFinite(pointsToAdd) || pointsToAdd === 0) return;
+
+    setSavingExtraPoints(true);
+    setErrorMessage("");
+
+    const newExtraPoints = (selectedEmployee.extra_points || 0) + pointsToAdd;
+
+    const { error } = await supabase
+      .from("employees")
+      .update({ extra_points: newExtraPoints })
+      .eq("id", selectedEmployee.id);
+
+    setSavingExtraPoints(false);
+
+    if (error) {
+      console.log("ADD EXTRA POINTS ERROR:", error);
+      setErrorMessage("Extra punten konden niet opgeslagen worden.");
+      return;
+    }
+
+    setEmployees((prev) =>
+      prev.map((employee) =>
+        employee.id === selectedEmployee.id
+          ? { ...employee, extra_points: newExtraPoints }
+          : employee
+      )
+    );
+
+    setExtraPointsInput("");
+  }
+
+  async function onAddCatalogItem() {
+    if (!newItemName.trim()) return;
+
+    setSavingItem(true);
+    setErrorMessage("");
+
+    const payload = {
+      name: newItemName.trim(),
+      points: Number(newItemPoints) || 0,
+      active: true,
+    };
+
+    const { data, error } = await supabase
+      .from("catalog_items")
+      .insert([payload])
+      .select();
+
+    setSavingItem(false);
+
+    if (error) {
+      console.log("ADD CATALOG ITEM ERROR:", error);
+      setErrorMessage("Artikel kon niet toegevoegd worden.");
+      return;
+    }
+
+    setCatalogItems((prev) => [...prev, ...(data || [])]);
+    setNewItemName("");
+    setNewItemPoints("");
+    setShowCatalog(true);
+  }
+
+  async function onToggleCatalogItem(item) {
+    setErrorMessage("");
+
+    const nextActive = !item.active;
+
+    const { error } = await supabase
+      .from("catalog_items")
+      .update({ active: nextActive })
+      .eq("id", item.id);
+
+    if (error) {
+      console.log("TOGGLE CATALOG ITEM ERROR:", error);
+      setErrorMessage("Artikelstatus kon niet aangepast worden.");
+      return;
+    }
+
+    setCatalogItems((prev) =>
+      prev.map((catalogItem) =>
+        catalogItem.id === item.id
+          ? { ...catalogItem, active: nextActive }
+          : catalogItem
+      )
+    );
+  }
+
+  function onAddLineToCart() {
+    if (!selectedItemId || qty <= 0) return;
+
+    const item = catalogItems.find(
+      (catalogItem) => String(catalogItem.id) === String(selectedItemId)
+    );
+    if (!item) return;
+
+    setOrderCart((prev) => [
+      ...prev,
+      {
+        tempId: Date.now() + Math.random(),
+        item_id: item.id,
+        item_name: item.name,
+        qty: Number(qty),
+        points_per_unit: item.points,
+      },
+    ]);
+
+    setSelectedItemId("");
+    setQty(1);
+  }
+
+  function onRemoveLineFromCart(tempId) {
+    setOrderCart((prev) => prev.filter((line) => line.tempId !== tempId));
+  }
+
+  async function onCreateOrder() {
+    if (!selectedEmployeeId) {
+      setErrorMessage("Kies eerst een werknemer.");
+      return;
+    }
+
+    if (!orderCart || orderCart.length === 0) {
+      setErrorMessage("Voeg eerst minstens 1 artikel toe aan de bestelling.");
+      return;
+    }
+
+    setSavingOrder(true);
+    setErrorMessage("");
+
+    try {
+      const employeeId = Number(selectedEmployeeId);
+
+      const { data: orderData, error: orderError } = await supabase
+        .from("orders")
+        .insert([
+          {
+            employee_id: employeeId,
+            order_date: new Date().toISOString().slice(0, 10),
+            status: "In aanvraag",
+            note: "",
+          },
+        ])
+        .select();
+
+      if (orderError) {
+        console.log("CREATE ORDER ERROR:", orderError);
+        setErrorMessage("Bestelling kon niet opgeslagen worden.");
+        return;
+      }
+
+      const order = orderData?.[0];
+      if (!order) {
+        setErrorMessage("Bestelling werd niet correct aangemaakt.");
+        return;
+      }
+
+      const insertLines = orderCart.map((line) => ({
+        order_id: order.id,
+        item_id: Number(line.item_id),
+        qty: Number(line.qty),
+        points_per_unit: Number(line.points_per_unit),
+      }));
+
+      const { data: lineData, error: lineError } = await supabase
+        .from("order_lines")
+        .insert(insertLines)
+        .select();
+
+      if (lineError) {
+        console.log("CREATE ORDER LINES ERROR:", lineError);
+        await supabase.from("orders").delete().eq("id", order.id);
+        setErrorMessage("Bestellijnen konden niet opgeslagen worden.");
+        return;
+      }
+
+      setOrdersByEmployee((prev) => {
+        const currentOrders = prev[employeeId] || [];
+        return {
+          ...prev,
+          [employeeId]: [
+            {
+              ...order,
+              lines: lineData || [],
+            },
+            ...currentOrders,
+          ],
+        };
+      });
+
+      setSelectedEmployeeId("");
+      setSelectedItemId("");
+      setQty(1);
+      setOrderCart([]);
+      setShowOrdersOverview(true);
+
+      await loadOrdersAndLines();
+    } catch (error) {
+      console.log("ON CREATE ORDER UNEXPECTED ERROR:", error);
+      setErrorMessage("Er liep iets mis bij het opslaan van de bestelling.");
+    } finally {
+      setSavingOrder(false);
+    }
+  }
+
+  async function onUpdateOrderStatus(orderId, employeeId, nextStatus) {
+    setErrorMessage("");
+
+    const { error } = await supabase
+      .from("orders")
+      .update({ status: nextStatus })
+      .eq("id", orderId);
+
+    if (error) {
+      console.log("UPDATE ORDER STATUS ERROR:", error);
+      setErrorMessage("Bestelstatus kon niet aangepast worden.");
+      return;
+    }
+
+    setOrdersByEmployee((prev) => {
+      const currentOrders = prev[employeeId] || [];
+      return {
+        ...prev,
+        [employeeId]: currentOrders.map((order) =>
+          order.id === orderId ? { ...order, status: nextStatus } : order
+        ),
+      };
+    });
+  }
+
+  function getItemName(itemId) {
+    const item = catalogItems.find((catalogItem) => catalogItem.id === itemId);
+    return item ? item.name : `Artikel ${itemId}`;
+  }
+
+  function blockStyle() {
+    return {
+      border: "1px solid #ddd",
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 24,
+      background: "#f8fafc",
+    };
+  }
+
+  function inputStyle() {
+    return {
+      display: "block",
+      width: "100%",
+      padding: 10,
+      marginTop: 4,
+    };
+  }
+
+  function statusStyle(orderStatus) {
+    const map = {
+      "In aanvraag": { background: "#dbeafe", color: "#1d4ed8" },
+      Goedgekeurd: { background: "#dcfce7", color: "#166534" },
+      Besteld: { background: "#fef3c7", color: "#92400e" },
+      Geleverd: { background: "#e9d5ff", color: "#6b21a8" },
+      Geannuleerd: { background: "#fee2e2", color: "#991b1b" },
+    };
+    return {
+      display: "inline-block",
+      padding: "4px 10px",
+      borderRadius: 999,
+      fontSize: 12,
+      ...(map[orderStatus] || { background: "#e5e7eb", color: "#111827" }),
+    };
+  }
+
+  function sectionHeader(title, isOpen, setOpen, extra = null) {
     return (
-      <div style={styles.app}>
-        <div style={styles.wrap}>
-          <div style={{ ...styles.card, marginTop: 40 }}>
-            <div style={{ ...styles.badge, marginBottom: 12 }}>PWA prototype</div>
-            <h1 style={styles.title}>Werkkledij Wilms</h1>
-            <p style={styles.muted}>Interne webapp voor ongeveer 200 werknemers. Werkt op pc en iPhone via Safari.</p>
-            <div style={{ ...styles.grid2, marginTop: 18 }}>
-              <div>
-                <label>Rol</label>
-                <select style={styles.select} defaultValue="employee" onChange={(e) => setSession({ role: e.target.value, employeeId: e.target.value === 'employee' ? selectedEmployeeId : null })}>
-                  <option value="employee">Werknemer</option>
-                  <option value="admin">Beheerder</option>
-                </select>
-              </div>
-              <div>
-                <label>Werknemer</label>
-                <select style={styles.select} value={selectedEmployeeId} onChange={(e) => setSelectedEmployeeId(e.target.value)}>
-                  {enriched.map((employee) => <option key={employee.id} value={employee.id}>{employee.fullName}</option>)}
-                </select>
-              </div>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <button style={styles.button} onClick={() => setSession({ role: 'employee', employeeId: selectedEmployeeId })}>Open als werknemer</button>
-              <button style={{ ...styles.buttonLight, marginLeft: 10 }} onClick={() => setSession({ role: 'admin', employeeId: null })}>Open als beheerder</button>
-            </div>
-          </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: isOpen ? 16 : 0,
+        }}
+      >
+        <h2 style={{ margin: 0 }}>{title}</h2>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {extra}
+          <button onClick={() => setOpen(!isOpen)}>
+            {isOpen ? "Dichtvouwen" : "Openvouwen"}
+          </button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
-    <div style={styles.app}>
-      <div style={styles.wrap}>
-        <div style={styles.card}>
-          <h1 style={styles.title}>Werkkledij Wilms</h1>
-          <p style={styles.muted}>{session.role === 'admin' ? 'Beheerderoverzicht' : `Ingelogd als ${selectedEmployee?.fullName || ''}`}</p>
-          <div style={{ marginTop: 12 }}>
-            <button style={styles.buttonLight} onClick={() => setSession(null)}>Afmelden</button>
-          </div>
+    <div
+      style={{
+        padding: 20,
+        fontFamily: "Arial, sans-serif",
+        maxWidth: 1200,
+        margin: "0 auto",
+      }}
+    >
+      <h1>Werkkledij Wilms (Admin)</h1>
+
+      {errorMessage ? (
+        <div
+          style={{
+            background: "#fee2e2",
+            color: "#991b1b",
+            padding: 12,
+            borderRadius: 8,
+            marginBottom: 20,
+          }}
+        >
+          {errorMessage}
         </div>
+      ) : null}
 
-        {session.role === 'admin' && (
+      <div
+        style={{
+          display: "grid",
+          gap: 16,
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          marginBottom: 24,
+        }}
+      >
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Actieve werknemers</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.activeEmployees}</div>
+        </div>
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Totaal budget</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalBudget}</div>
+        </div>
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Verbruikt</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalSpent}</div>
+        </div>
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Resterend</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalRemaining}</div>
+        </div>
+        <div style={blockStyle()}>
+          <div style={{ fontSize: 13, color: "#64748b" }}>Bestellingen</div>
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalOrders}</div>
+        </div>
+      </div>
+
+      <div style={blockStyle()}>
+        {sectionHeader("Nieuwe werknemer", showNewEmployee, setShowNewEmployee)}
+        {showNewEmployee ? (
+          <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
+            <div>
+              <label>Voornaam</label>
+              <input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                style={inputStyle()}
+              />
+            </div>
+
+            <div>
+              <label>Achternaam</label>
+              <input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                style={inputStyle()}
+              />
+            </div>
+
+            <div>
+              <label>Statuut</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                style={inputStyle()}
+              >
+                <option value="Arbeider">Arbeider</option>
+                <option value="Bediende">Bediende</option>
+              </select>
+            </div>
+
+            <div>
+              <button onClick={onAddEmployee} disabled={savingEmployee}>
+                {savingEmployee ? "Opslaan..." : "Werknemer toevoegen"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div style={blockStyle()}>
+        {sectionHeader("Nieuwe bestelling", showNewOrder, setShowNewOrder)}
+        {showNewOrder ? (
           <>
-            <div style={styles.grid3}>
-              <div style={styles.stat}><div style={styles.muted}>Werknemers</div><div style={styles.statValue}>{enriched.length}</div></div>
-              <div style={styles.stat}><div style={styles.muted}>Totaal budget</div><div style={styles.statValue}>{totals.totalBudget}</div></div>
-              <div style={styles.stat}><div style={styles.muted}>Verbruikt</div><div style={styles.statValue}>{totals.totalSpent}</div></div>
-              <div style={styles.stat}><div style={styles.muted}>Resterend</div><div style={styles.statValue}>{totals.totalRemaining}</div></div>
-            </div>
-
-            <div style={styles.card}>
-              <h2>Excel import</h2>
-              <p style={styles.muted}>Laad het werkblad INVOER uit jullie Excelbestand.</p>
-              <input type="file" accept=".xlsx,.xls" onChange={handleImport} />
-              {importMeta && <p style={{ color: '#166534' }}>{importMeta.fileName} geladen. {importMeta.rowCount} werknemers ingelezen.</p>}
-              {importError && <p style={{ color: '#b91c1c' }}>{importError}</p>}
-            </div>
-
-            <div style={styles.card}>
-              <h2>Overzicht werknemers</h2>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Naam</th>
-                      <th style={styles.th}>Statuut</th>
-                      <th style={styles.th}>Budget</th>
-                      <th style={styles.th}>Verbruikt</th>
-                      <th style={styles.th}>Resterend</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {enriched.map((employee) => (
-                      <tr key={employee.id}>
-                        <td style={styles.td}>{employee.fullName}</td>
-                        <td style={styles.td}>{employee.status}</td>
-                        <td style={styles.td}>{employee.budget}</td>
-                        <td style={styles.td}>{employee.spent}</td>
-                        <td style={styles.td}>{employee.remaining}</td>
-                      </tr>
+            <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
+              <div>
+                <label>Werknemer</label>
+                <select
+                  value={selectedEmployeeId}
+                  onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                  style={inputStyle()}
+                >
+                  <option value="">Kies werknemer</option>
+                  {employeesWithStats
+                    .filter((employee) => employee.active)
+                    .map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.full_name} ({employee.remaining} pt)
+                      </option>
                     ))}
-                  </tbody>
-                </table>
+                </select>
               </div>
+
+              <div>
+                <label>Artikel</label>
+                <select
+                  value={selectedItemId}
+                  onChange={(e) => setSelectedItemId(e.target.value)}
+                  style={inputStyle()}
+                >
+                  <option value="">Kies artikel</option>
+                  {activeCatalogItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} ({item.points} pt)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Aantal</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={qty}
+                  onChange={(e) => setQty(Number(e.target.value))}
+                  style={inputStyle()}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={onAddLineToCart}>
+                  Artikel toevoegen aan bestelling
+                </button>
+                <button
+                  onClick={onCreateOrder}
+                  disabled={
+                    savingOrder || !selectedEmployeeId || orderCart.length === 0
+                  }
+                >
+                  {savingOrder ? "Opslaan..." : "Volledige bestelling opslaan"}
+                </button>
+              </div>
+            </div>
+
+            {selectedOrderEmployee ? (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 12,
+                  borderRadius: 8,
+                  background: projectedRemaining !== null && projectedRemaining < 0
+                    ? "#fee2e2"
+                    : "#eff6ff",
+                  color:
+                    projectedRemaining !== null && projectedRemaining < 0
+                      ? "#991b1b"
+                      : "#1d4ed8",
+                }}
+              >
+                <div>
+                  <strong>Huidig saldo:</strong> {selectedOrderEmployee.remaining} pt
+                </div>
+                <div>
+                  <strong>Bestelling in mandje:</strong> {currentOrderTotal} pt
+                </div>
+                <div>
+                  <strong>Saldo na bestelling:</strong>{" "}
+                  {projectedRemaining !== null ? projectedRemaining : "-"} pt
+                </div>
+                {projectedRemaining !== null && projectedRemaining < 0 ? (
+                  <div style={{ marginTop: 8, fontWeight: 700 }}>
+                    Waarschuwing: deze bestelling gaat boven het beschikbare saldo.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 20 }}>
+              <h3>Bestellijnen</h3>
+              {orderCart.length === 0 ? (
+                <div>Nog geen artikels toegevoegd.</div>
+              ) : (
+                <div>
+                  {orderCart.map((line) => (
+                    <div
+                      key={line.tempId}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        borderBottom: "1px solid #eee",
+                        padding: "8px 0",
+                        gap: 12,
+                      }}
+                    >
+                      <div>
+                        {line.item_name} - {line.qty} x {line.points_per_unit} pt ={" "}
+                        {line.qty * line.points_per_unit} pt
+                      </div>
+                      <button onClick={() => onRemoveLineFromCart(line.tempId)}>
+                        Verwijderen
+                      </button>
+                    </div>
+                  ))}
+                  <div style={{ marginTop: 12, fontWeight: 700 }}>
+                    Totaal: {currentOrderTotal} pt
+                  </div>
+                </div>
+              )}
             </div>
           </>
-        )}
+        ) : null}
+      </div>
 
-        {session.role === 'employee' && selectedEmployee && (
-          <>
-            <div style={styles.grid3}>
-              <div style={styles.stat}><div style={styles.muted}>Beschikbaar saldo</div><div style={styles.statValue}>{selectedEmployee.remaining}</div></div>
-              <div style={styles.stat}><div style={styles.muted}>Budget</div><div style={styles.statValue}>{selectedEmployee.budget}</div></div>
-              <div style={styles.stat}><div style={styles.muted}>Verbruikt</div><div style={styles.statValue}>{selectedEmployee.spent}</div></div>
+      <div style={blockStyle()}>
+        {sectionHeader("Nieuw artikel", showNewItem, setShowNewItem)}
+        {showNewItem ? (
+          <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
+            <div>
+              <label>Artikelnaam</label>
+              <input
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                style={inputStyle()}
+              />
             </div>
 
-            <div style={styles.grid2}>
-              <div style={styles.card}>
-                <h2>Nieuwe bestelling</h2>
-                <div style={{ marginBottom: 12 }}>
-                  <label>Artikel</label>
-                  <select style={styles.select} value={itemId} onChange={(e) => setItemId(e.target.value)}>
-                    {catalog.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.points} pt)</option>)}
-                  </select>
-                </div>
-                <div style={{ marginBottom: 12 }}>
-                  <label>Aantal</label>
-                  <input style={styles.input} type="number" min="1" value={qty} onChange={(e) => setQty(Number(e.target.value) || 1)} />
-                </div>
-                <button style={styles.button} onClick={addOrder}>Bestelling registreren</button>
-              </div>
+            <div>
+              <label>Punten</label>
+              <input
+                type="number"
+                value={newItemPoints}
+                onChange={(e) => setNewItemPoints(e.target.value)}
+                style={inputStyle()}
+              />
+            </div>
 
-              <div style={styles.card}>
-                <h2>Catalogus</h2>
-                <div style={{ maxHeight: 340, overflow: 'auto' }}>
-                  {catalog.map((item) => (
-                    <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #e2e8f0' }}>
-                      <span>{item.name}</span>
-                      <strong>{item.points} pt</strong>
+            <div>
+              <button onClick={onAddCatalogItem} disabled={savingItem}>
+                {savingItem ? "Opslaan..." : "Artikel toevoegen"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div style={blockStyle()}>
+        {sectionHeader("Zoek en filter werknemers", showSearchFilter, setShowSearchFilter)}
+        {showSearchFilter ? (
+          <div
+            style={{
+              display: "grid",
+              gap: 12,
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            }}
+          >
+            <div>
+              <label>Zoek op naam</label>
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="bv. Meeus of Janssens"
+                style={inputStyle()}
+              />
+            </div>
+
+            <div>
+              <label>Filter op statuut</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={inputStyle()}
+              >
+                <option value="all">Alle statuten</option>
+                <option value="Arbeider">Arbeider</option>
+                <option value="Bediende">Bediende</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Filter op status</label>
+              <select
+                value={activeFilter}
+                onChange={(e) => setActiveFilter(e.target.value)}
+                style={inputStyle()}
+              >
+                <option value="active">Alleen actief</option>
+                <option value="inactive">Alleen inactief</option>
+                <option value="all">Alles</option>
+              </select>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div style={blockStyle()}>
+        {sectionHeader(
+          "Werknemers",
+          showEmployees,
+          setShowEmployees,
+          <span>{filteredEmployees.length} gevonden</span>
+        )}
+        {showEmployees ? (
+          <>
+            {loadingEmployees ? <div>Werknemers laden...</div> : null}
+
+            {filteredEmployees.map((employee) => (
+              <div
+                key={employee.id}
+                style={{
+                  padding: 12,
+                  borderBottom: "1px solid #eee",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <strong>{employee.full_name}</strong> ({employee.status}) - budget{" "}
+                  {employee.budget} / verbruikt {employee.spent} / saldo{" "}
+                  {employee.remaining}
+                  {!employee.active && <span> - inactief</span>}
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setDetailEmployeeId(employee.id)}>
+                    Detail
+                  </button>
+                  {employee.active ? (
+                    <button onClick={() => onDeactivateEmployee(employee.id)}>
+                      Inactief zetten
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </>
+        ) : null}
+      </div>
+
+      {selectedEmployee ? (
+        <div style={blockStyle()}>
+          <h2 style={{ marginTop: 0 }}>
+            Werknemerdetail: {selectedEmployee.full_name}
+          </h2>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 16,
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              marginBottom: 20,
+            }}
+          >
+            <div>
+              <strong>Statuut:</strong> {selectedEmployee.status}
+            </div>
+            <div>
+              <strong>Budget:</strong> {selectedEmployee.budget}
+            </div>
+            <div>
+              <strong>Historisch verbruikt:</strong>{" "}
+              {selectedEmployee.opening_spent || 0}
+            </div>
+            <div>
+              <strong>Totaal verbruikt:</strong> {selectedEmployee.spent}
+            </div>
+            <div>
+              <strong>Saldo:</strong> {selectedEmployee.remaining}
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 320, marginBottom: 20 }}>
+            <label>Extra punten toevoegen</label>
+            <input
+              type="number"
+              value={extraPointsInput}
+              onChange={(e) => setExtraPointsInput(e.target.value)}
+              style={inputStyle()}
+            />
+            <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+              <button onClick={onAddExtraPoints} disabled={savingExtraPoints}>
+                {savingExtraPoints ? "Opslaan..." : "Extra punten opslaan"}
+              </button>
+              <button onClick={() => setDetailEmployeeId(null)}>Sluiten</button>
+            </div>
+          </div>
+
+          <h3>Bestellingen</h3>
+          {(ordersByEmployee[selectedEmployee.id] || []).length === 0 ? (
+            <div>Geen nieuwe bestellingen voor deze werknemer.</div>
+          ) : (
+            (ordersByEmployee[selectedEmployee.id] || []).map((order) => (
+              <div
+                key={order.id}
+                style={{
+                  borderTop: "1px solid #eee",
+                  paddingTop: 10,
+                  marginTop: 10,
+                  opacity: order.status === "Geannuleerd" ? 0.6 : 1,
+                }}
+              >
+                <div style={{ marginBottom: 6 }}>
+                  <strong>Datum:</strong> {order.order_date}
+                </div>
+                <div style={{ marginBottom: 6 }}>
+                  <strong>Status:</strong>{" "}
+                  <span style={statusStyle(order.status)}>{order.status}</span>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    marginBottom: 10,
+                  }}
+                >
+                  {ORDER_STATUSES.map((nextStatus) => (
+                    <button
+                      key={nextStatus}
+                      onClick={() =>
+                        onUpdateOrderStatus(
+                          order.id,
+                          selectedEmployee.id,
+                          nextStatus
+                        )
+                      }
+                      disabled={order.status === nextStatus}
+                    >
+                      {nextStatus}
+                    </button>
+                  ))}
+                </div>
+
+                <ul>
+                  {(order.lines || []).map((line) => (
+                    <li key={line.id}>
+                      {getItemName(line.item_id)} - {line.qty} x{" "}
+                      {line.points_per_unit} pt
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
+
+      <div style={blockStyle()}>
+        {sectionHeader("Catalogus", showCatalog, setShowCatalog)}
+        {showCatalog ? (
+          <>
+            {loadingCatalog ? <div>Catalogus laden...</div> : null}
+            {catalogItems.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "8px 0",
+                  borderBottom: "1px solid #eee",
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
+                </div>
+                <button onClick={() => onToggleCatalogItem(item)}>
+                  {item.active ? "Inactief zetten" : "Activeren"}
+                </button>
+              </div>
+            ))}
+          </>
+        ) : null}
+      </div>
+
+      <div style={blockStyle()}>
+        {sectionHeader("Bestellingen per werknemer", showOrdersOverview, setShowOrdersOverview)}
+        {showOrdersOverview ? (
+          <>
+            {loadingOrders ? <div>Bestellingen laden...</div> : null}
+
+            {employeesWithStats.map((employee) => {
+              const employeeOrders = ordersByEmployee[employee.id] || [];
+              if (employeeOrders.length === 0) return null;
+
+              return (
+                <div
+                  key={employee.id}
+                  style={{
+                    border: "1px solid #eee",
+                    borderRadius: 8,
+                    padding: 12,
+                    marginBottom: 12,
+                    background: "#fff",
+                  }}
+                >
+                  <h3 style={{ marginTop: 0 }}>{employee.full_name}</h3>
+
+                  {employeeOrders.map((order) => (
+                    <div
+                      key={order.id}
+                      style={{
+                        borderTop: "1px solid #eee",
+                        paddingTop: 10,
+                        marginTop: 10,
+                        opacity: order.status === "Geannuleerd" ? 0.6 : 1,
+                      }}
+                    >
+                      <div style={{ marginBottom: 6 }}>
+                        <strong>Datum:</strong> {order.order_date}
+                      </div>
+                      <div style={{ marginBottom: 6 }}>
+                        <strong>Status:</strong>{" "}
+                        <span style={statusStyle(order.status)}>{order.status}</span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          flexWrap: "wrap",
+                          marginBottom: 10,
+                        }}
+                      >
+                        {ORDER_STATUSES.map((nextStatus) => (
+                          <button
+                            key={nextStatus}
+                            onClick={() =>
+                              onUpdateOrderStatus(order.id, employee.id, nextStatus)
+                            }
+                            disabled={order.status === nextStatus}
+                          >
+                            {nextStatus}
+                          </button>
+                        ))}
+                      </div>
+
+                      <ul>
+                        {(order.lines || []).map((line) => (
+                          <li key={line.id}>
+                            {getItemName(line.item_id)} - {line.qty} x{" "}
+                            {line.points_per_unit} pt
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-
-            <div style={styles.card}>
-              <h2>Mijn historiek</h2>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Datum</th>
-                      <th style={styles.th}>Items</th>
-                      <th style={styles.th}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedEmployee.orders.map((order) => (
-                      <tr key={order.id}>
-                        <td style={styles.td}>{order.date}</td>
-                        <td style={styles.td}>{formatOrderItems(order.items)}</td>
-                        <td style={styles.td}><span style={styles.badge}>{order.status}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+              );
+            })}
           </>
-        )}
+        ) : null}
       </div>
     </div>
-  )
+  );
 }
-
-export default App
