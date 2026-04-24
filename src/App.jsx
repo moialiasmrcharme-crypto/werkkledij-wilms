@@ -1,3 +1,4 @@
+<h1 style={{color: "red"}}>NIEUWE VERSIE TEST</h1>
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
 
