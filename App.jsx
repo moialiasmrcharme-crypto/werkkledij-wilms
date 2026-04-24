@@ -3,1183 +3,200 @@ import { supabase } from "./lib/supabase";
 
 export default function App() {
   const [employees, setEmployees] = useState([]);
-  const [catalogItems, setCatalogItems] = useState([]);
+  const [stockItems, setStockItems] = useState([]);
   const [ordersByEmployee, setOrdersByEmployee] = useState({});
 
-  const [loadingEmployees, setLoadingEmployees] = useState(true);
-  const [loadingCatalog, setLoadingCatalog] = useState(true);
-  const [loadingOrders, setLoadingOrders] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [status, setStatus] = useState("Arbeider");
-  const [savingEmployee, setSavingEmployee] = useState(false);
-
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
-  const [selectedItemId, setSelectedItemId] = useState("");
+  const [selectedStockId, setSelectedStockId] = useState("");
   const [qty, setQty] = useState(1);
+
   const [orderCart, setOrderCart] = useState([]);
-  const [savingOrder, setSavingOrder] = useState(false);
+  const [error, setError] = useState("");
 
-  const [newItemName, setNewItemName] = useState("");
-  const [newItemPoints, setNewItemPoints] = useState("");
-  const [savingItem, setSavingItem] = useState(false);
+  useEffect(() => {
+    loadAll();
+  }, []);
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [activeFilter, setActiveFilter] = useState("active");
-
-  const [detailEmployeeId, setDetailEmployeeId] = useState(null);
-  const [extraPointsInput, setExtraPointsInput] = useState("");
-  const [savingExtraPoints, setSavingExtraPoints] = useState(false);
-
-  const [showNewEmployee, setShowNewEmployee] = useState(true);
-  const [showNewOrder, setShowNewOrder] = useState(true);
-  const [showNewItem, setShowNewItem] = useState(false);
-  const [showSearchFilter, setShowSearchFilter] = useState(true);
-  const [showEmployees, setShowEmployees] = useState(false);
-  const [showCatalog, setShowCatalog] = useState(false);
-  const [showOrdersOverview, setShowOrdersOverview] = useState(false);
-
-  const ORDER_STATUSES = [
-    "In aanvraag",
-    "Goedgekeurd",
-    "Besteld",
-    "Geleverd",
-    "Geannuleerd",
-  ];
-
-  const activeCatalogItems = useMemo(
-    () => catalogItems.filter((item) => item.active),
-    [catalogItems]
-  );
-
-  const employeesWithStats = useMemo(() => {
-    return employees.map((employee) => {
-      const basePoints = employee.status === "Arbeider" ? 300 : 40;
-      const extraPoints = employee.extra_points || 0;
-      const budget = Math.min(500, basePoints + extraPoints);
-
-      const orders = ordersByEmployee[employee.id] || [];
-      const newSpent = orders.reduce((sum, order) => {
-        if (order.status === "Geannuleerd") return sum;
-        return (
-          sum +
-          (order.lines || []).reduce(
-            (lineSum, line) => lineSum + line.qty * line.points_per_unit,
-            0
-          )
-        );
-      }, 0);
-
-      const openingSpent = employee.opening_spent || 0;
-      const spent = openingSpent + newSpent;
-
-      return {
-        ...employee,
-        budget,
-        spent,
-        remaining: budget - spent,
-      };
-    });
-  }, [employees, ordersByEmployee]);
-
-  const filteredEmployees = useMemo(() => {
-    let result = [...employeesWithStats];
-
-    if (searchTerm.trim()) {
-      const search = searchTerm.toLowerCase().trim();
-      result = result.filter((employee) =>
-        (employee.full_name || "").toLowerCase().includes(search)
-      );
-    }
-
-    if (statusFilter !== "all") {
-      result = result.filter((employee) => employee.status === statusFilter);
-    }
-
-    if (activeFilter === "active") {
-      result = result.filter((employee) => employee.active);
-    } else if (activeFilter === "inactive") {
-      result = result.filter((employee) => !employee.active);
-    }
-
-    result.sort((a, b) =>
-      (a.full_name || "").localeCompare(b.full_name || "", "nl-BE")
-    );
-
-    return result;
-  }, [employeesWithStats, searchTerm, statusFilter, activeFilter]);
-
-  const selectedEmployee = useMemo(() => {
-    return (
-      employeesWithStats.find((employee) => employee.id === Number(detailEmployeeId)) ||
-      null
-    );
-  }, [employeesWithStats, detailEmployeeId]);
-
-  const selectedOrderEmployee = useMemo(() => {
-    return (
-      employeesWithStats.find(
-        (employee) => employee.id === Number(selectedEmployeeId)
-      ) || null
-    );
-  }, [employeesWithStats, selectedEmployeeId]);
-
-  const dashboardStats = useMemo(() => {
-    const activeEmployees = employeesWithStats.filter((employee) => employee.active);
-    const totalBudget = activeEmployees.reduce((sum, employee) => sum + employee.budget, 0);
-    const totalSpent = activeEmployees.reduce((sum, employee) => sum + employee.spent, 0);
-    const totalRemaining = activeEmployees.reduce((sum, employee) => sum + employee.remaining, 0);
-    const totalOrders = Object.values(ordersByEmployee).reduce(
-      (sum, employeeOrders) => sum + employeeOrders.length,
-      0
-    );
-
-    return {
-      activeEmployees: activeEmployees.length,
-      totalBudget,
-      totalSpent,
-      totalRemaining,
-      totalOrders,
-    };
-  }, [employeesWithStats, ordersByEmployee]);
-
-  const currentOrderTotal = useMemo(() => {
-    return orderCart.reduce(
-      (sum, line) => sum + line.qty * line.points_per_unit,
-      0
-    );
-  }, [orderCart]);
-
-  const projectedRemaining = useMemo(() => {
-    if (!selectedOrderEmployee) return null;
-    return selectedOrderEmployee.remaining - currentOrderTotal;
-  }, [selectedOrderEmployee, currentOrderTotal]);
-
-  async function loadEmployees() {
-    setLoadingEmployees(true);
-    setErrorMessage("");
-
-    const { data, error } = await supabase
-      .from("employees")
-      .select("*")
-      .order("full_name", { ascending: true });
-
-    setLoadingEmployees(false);
-
-    if (error) {
-      console.log("LOAD EMPLOYEES ERROR:", error);
-      setErrorMessage("Werknemers konden niet geladen worden.");
-      return;
-    }
-
-    setEmployees(data || []);
-  }
-
-  async function loadCatalog() {
-    setLoadingCatalog(true);
-    setErrorMessage("");
-
-    const { data, error } = await supabase
-      .from("catalog_items")
-      .select("*")
-      .order("id", { ascending: true });
-
-    setLoadingCatalog(false);
-
-    if (error) {
-      console.log("LOAD CATALOG ERROR:", error);
-      setErrorMessage("Catalogus kon niet geladen worden.");
-      return;
-    }
-
-    setCatalogItems(data || []);
-  }
-
-  async function loadOrdersAndLines() {
-    setLoadingOrders(true);
-
-    const { data: orders, error: ordersError } = await supabase
-      .from("orders")
-      .select("*")
-      .order("id", { ascending: false });
-
-    if (ordersError) {
-      console.log("LOAD ORDERS ERROR:", ordersError);
-      setLoadingOrders(false);
-      setErrorMessage("Bestellingen konden niet geladen worden.");
-      return;
-    }
-
-    const { data: lines, error: linesError } = await supabase
-      .from("order_lines")
-      .select("*")
-      .order("id", { ascending: true });
-
-    setLoadingOrders(false);
-
-    if (linesError) {
-      console.log("LOAD ORDER LINES ERROR:", linesError);
-      setErrorMessage("Bestellijnen konden niet geladen worden.");
-      return;
-    }
+  async function loadAll() {
+    const { data: emp } = await supabase.from("employees").select("*");
+    const { data: stock } = await supabase.from("stock_items").select("*");
+    const { data: orders } = await supabase.from("orders").select("*");
+    const { data: lines } = await supabase.from("order_lines").select("*");
 
     const grouped = {};
-    (orders || []).forEach((order) => {
-      const employeeId = order.employee_id;
-      if (!grouped[employeeId]) grouped[employeeId] = [];
-      grouped[employeeId].push({
-        ...order,
-        lines: (lines || []).filter((line) => line.order_id === order.id),
+    orders?.forEach((o) => {
+      if (!grouped[o.employee_id]) grouped[o.employee_id] = [];
+      grouped[o.employee_id].push({
+        ...o,
+        lines: lines?.filter((l) => l.order_id === o.id),
       });
     });
 
+    setEmployees(emp || []);
+    setStockItems(stock || []);
     setOrdersByEmployee(grouped);
   }
 
-  useEffect(() => {
-    async function init() {
-      await Promise.all([loadEmployees(), loadCatalog(), loadOrdersAndLines()]);
-    }
-    init();
-  }, []);
+  const activeStock = stockItems.filter((s) => s.active);
 
-  async function onAddEmployee() {
-    if (!firstName.trim() || !lastName.trim()) return;
-
-    setSavingEmployee(true);
-    setErrorMessage("");
-
-    const payload = {
-      first_name: firstName.trim(),
-      last_name: lastName.trim(),
-      full_name: `${lastName.trim()} ${firstName.trim()}`,
-      email: "",
-      status,
-      active: true,
-      extra_points: 0,
-      opening_spent: 0,
-    };
-
-    const { data, error } = await supabase
-      .from("employees")
-      .insert([payload])
-      .select();
-
-    setSavingEmployee(false);
-
-    if (error) {
-      console.log("ADD EMPLOYEE ERROR:", error);
-      setErrorMessage("Werknemer kon niet toegevoegd worden.");
-      return;
-    }
-
-    setEmployees((prev) =>
-      [...prev, ...(data || [])].sort((a, b) =>
-        (a.full_name || "").localeCompare(b.full_name || "", "nl-BE")
-      )
-    );
-
-    setFirstName("");
-    setLastName("");
-    setStatus("Arbeider");
-    setShowEmployees(true);
-  }
-
-  async function onDeactivateEmployee(id) {
-    setErrorMessage("");
-
-    const { error } = await supabase
-      .from("employees")
-      .update({ active: false })
-      .eq("id", id);
-
-    if (error) {
-      console.log("DEACTIVATE EMPLOYEE ERROR:", error);
-      setErrorMessage("Werknemer kon niet inactief gezet worden.");
-      return;
-    }
-
-    setEmployees((prev) =>
-      prev.map((employee) =>
-        employee.id === id ? { ...employee, active: false } : employee
-      )
-    );
-  }
-
-  async function onAddExtraPoints() {
-    if (!selectedEmployee || !extraPointsInput) return;
-
-    const pointsToAdd = Number(extraPointsInput);
-    if (!Number.isFinite(pointsToAdd) || pointsToAdd === 0) return;
-
-    setSavingExtraPoints(true);
-    setErrorMessage("");
-
-    const newExtraPoints = (selectedEmployee.extra_points || 0) + pointsToAdd;
-
-    const { error } = await supabase
-      .from("employees")
-      .update({ extra_points: newExtraPoints })
-      .eq("id", selectedEmployee.id);
-
-    setSavingExtraPoints(false);
-
-    if (error) {
-      console.log("ADD EXTRA POINTS ERROR:", error);
-      setErrorMessage("Extra punten konden niet opgeslagen worden.");
-      return;
-    }
-
-    setEmployees((prev) =>
-      prev.map((employee) =>
-        employee.id === selectedEmployee.id
-          ? { ...employee, extra_points: newExtraPoints }
-          : employee
-      )
-    );
-
-    setExtraPointsInput("");
-  }
-
-  async function onAddCatalogItem() {
-    if (!newItemName.trim()) return;
-
-    setSavingItem(true);
-    setErrorMessage("");
-
-    const payload = {
-      name: newItemName.trim(),
-      points: Number(newItemPoints) || 0,
-      active: true,
-    };
-
-    const { data, error } = await supabase
-      .from("catalog_items")
-      .insert([payload])
-      .select();
-
-    setSavingItem(false);
-
-    if (error) {
-      console.log("ADD CATALOG ITEM ERROR:", error);
-      setErrorMessage("Artikel kon niet toegevoegd worden.");
-      return;
-    }
-
-    setCatalogItems((prev) => [...prev, ...(data || [])]);
-    setNewItemName("");
-    setNewItemPoints("");
-    setShowCatalog(true);
-  }
-
-  async function onToggleCatalogItem(item) {
-    setErrorMessage("");
-
-    const nextActive = !item.active;
-
-    const { error } = await supabase
-      .from("catalog_items")
-      .update({ active: nextActive })
-      .eq("id", item.id);
-
-    if (error) {
-      console.log("TOGGLE CATALOG ITEM ERROR:", error);
-      setErrorMessage("Artikelstatus kon niet aangepast worden.");
-      return;
-    }
-
-    setCatalogItems((prev) =>
-      prev.map((catalogItem) =>
-        catalogItem.id === item.id
-          ? { ...catalogItem, active: nextActive }
-          : catalogItem
-      )
-    );
-  }
-
-  function onAddLineToCart() {
-    if (!selectedItemId || qty <= 0) return;
-
-    const item = catalogItems.find(
-      (catalogItem) => String(catalogItem.id) === String(selectedItemId)
-    );
+  function addToCart() {
+    const item = stockItems.find((s) => s.id == selectedStockId);
     if (!item) return;
+
+    if (item.quantity < qty) {
+      setError("Onvoldoende voorraad");
+      return;
+    }
 
     setOrderCart((prev) => [
       ...prev,
       {
-        tempId: Date.now() + Math.random(),
-        item_id: item.id,
-        item_name: item.name,
-        qty: Number(qty),
-        points_per_unit: item.points,
+        stock_item_id: item.id,
+        item_name: item.item_name,
+        size: item.size,
+        variant: item.variant,
+        qty,
       },
     ]);
-
-    setSelectedItemId("");
-    setQty(1);
   }
 
-  function onRemoveLineFromCart(tempId) {
-    setOrderCart((prev) => prev.filter((line) => line.tempId !== tempId));
-  }
+  async function createOrder() {
+    if (!selectedEmployeeId || orderCart.length === 0) return;
 
-  async function onCreateOrder() {
-    if (!selectedEmployeeId) {
-      setErrorMessage("Kies eerst een werknemer.");
-      return;
-    }
-
-    if (!orderCart || orderCart.length === 0) {
-      setErrorMessage("Voeg eerst minstens 1 artikel toe aan de bestelling.");
-      return;
-    }
-
-    setSavingOrder(true);
-    setErrorMessage("");
-
-    try {
-      const employeeId = Number(selectedEmployeeId);
-
-      const { data: orderData, error: orderError } = await supabase
-        .from("orders")
-        .insert([
-          {
-            employee_id: employeeId,
-            order_date: new Date().toISOString().slice(0, 10),
-            status: "In aanvraag",
-            note: "",
-          },
-        ])
-        .select();
-
-      if (orderError) {
-        console.log("CREATE ORDER ERROR:", orderError);
-        setErrorMessage("Bestelling kon niet opgeslagen worden.");
+    for (let line of orderCart) {
+      const stock = stockItems.find((s) => s.id === line.stock_item_id);
+      if (!stock || stock.quantity < line.qty) {
+        setError("Stock onvoldoende bij opslaan");
         return;
       }
-
-      const order = orderData?.[0];
-      if (!order) {
-        setErrorMessage("Bestelling werd niet correct aangemaakt.");
-        return;
-      }
-
-      const insertLines = orderCart.map((line) => ({
-        order_id: order.id,
-        item_id: Number(line.item_id),
-        qty: Number(line.qty),
-        points_per_unit: Number(line.points_per_unit),
-      }));
-
-      const { data: lineData, error: lineError } = await supabase
-        .from("order_lines")
-        .insert(insertLines)
-        .select();
-
-      if (lineError) {
-        console.log("CREATE ORDER LINES ERROR:", lineError);
-        await supabase.from("orders").delete().eq("id", order.id);
-        setErrorMessage("Bestellijnen konden niet opgeslagen worden.");
-        return;
-      }
-
-      setOrdersByEmployee((prev) => {
-        const currentOrders = prev[employeeId] || [];
-        return {
-          ...prev,
-          [employeeId]: [
-            {
-              ...order,
-              lines: lineData || [],
-            },
-            ...currentOrders,
-          ],
-        };
-      });
-
-      setSelectedEmployeeId("");
-      setSelectedItemId("");
-      setQty(1);
-      setOrderCart([]);
-      setShowOrdersOverview(true);
-
-      await loadOrdersAndLines();
-    } catch (error) {
-      console.log("ON CREATE ORDER UNEXPECTED ERROR:", error);
-      setErrorMessage("Er liep iets mis bij het opslaan van de bestelling.");
-    } finally {
-      setSavingOrder(false);
     }
-  }
 
-  async function onUpdateOrderStatus(orderId, employeeId, nextStatus) {
-    setErrorMessage("");
-
-    const { error } = await supabase
+    const { data: order } = await supabase
       .from("orders")
-      .update({ status: nextStatus })
-      .eq("id", orderId);
+      .insert([{ employee_id: Number(selectedEmployeeId) }])
+      .select()
+      .single();
 
-    if (error) {
-      console.log("UPDATE ORDER STATUS ERROR:", error);
-      setErrorMessage("Bestelstatus kon niet aangepast worden.");
-      return;
+    for (let line of orderCart) {
+      const stock = stockItems.find((s) => s.id === line.stock_item_id);
+
+      await supabase.from("order_lines").insert([
+        {
+          order_id: order.id,
+          stock_item_id: line.stock_item_id,
+          qty: line.qty,
+          size: line.size,
+          variant: line.variant,
+          points_per_unit: 0,
+        },
+      ]);
+
+      await supabase
+        .from("stock_items")
+        .update({ quantity: stock.quantity - line.qty })
+        .eq("id", line.stock_item_id);
     }
 
-    setOrdersByEmployee((prev) => {
-      const currentOrders = prev[employeeId] || [];
-      return {
-        ...prev,
-        [employeeId]: currentOrders.map((order) =>
-          order.id === orderId ? { ...order, status: nextStatus } : order
-        ),
-      };
-    });
+    setOrderCart([]);
+    setSelectedStockId("");
+    setQty(1);
+
+    await loadAll();
   }
 
-  function getItemName(itemId) {
-    const item = catalogItems.find((catalogItem) => catalogItem.id === itemId);
-    return item ? item.name : `Artikel ${itemId}`;
+  async function toggleStock(item) {
+    await supabase
+      .from("stock_items")
+      .update({ active: !item.active })
+      .eq("id", item.id);
+
+    loadAll();
   }
 
-  function blockStyle() {
-    return {
-      border: "1px solid #ddd",
-      borderRadius: 12,
-      padding: 16,
-      marginBottom: 24,
-      background: "#f8fafc",
-    };
-  }
+  function exportStock() {
+    const rows = stockItems.map((s) => ({
+      artikel: s.item_name,
+      maat: s.size,
+      voorraad: s.quantity,
+    }));
 
-  function inputStyle() {
-    return {
-      display: "block",
-      width: "100%",
-      padding: 10,
-      marginTop: 4,
-    };
-  }
+    const csv =
+      Object.keys(rows[0]).join(",") +
+      "\n" +
+      rows.map((r) => Object.values(r).join(",")).join("\n");
 
-  function statusStyle(orderStatus) {
-    const map = {
-      "In aanvraag": { background: "#dbeafe", color: "#1d4ed8" },
-      Goedgekeurd: { background: "#dcfce7", color: "#166534" },
-      Besteld: { background: "#fef3c7", color: "#92400e" },
-      Geleverd: { background: "#e9d5ff", color: "#6b21a8" },
-      Geannuleerd: { background: "#fee2e2", color: "#991b1b" },
-    };
-    return {
-      display: "inline-block",
-      padding: "4px 10px",
-      borderRadius: 999,
-      fontSize: 12,
-      ...(map[orderStatus] || { background: "#e5e7eb", color: "#111827" }),
-    };
-  }
-
-  function sectionHeader(title, isOpen, setOpen, extra = null) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: isOpen ? 16 : 0,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>{title}</h2>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {extra}
-          <button onClick={() => setOpen(!isOpen)}>
-            {isOpen ? "Dichtvouwen" : "Openvouwen"}
-          </button>
-        </div>
-      </div>
-    );
+    const blob = new Blob([csv]);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "voorraad.csv";
+    link.click();
   }
 
   return (
-    <div
-      style={{
-        padding: 20,
-        fontFamily: "Arial, sans-serif",
-        maxWidth: 1200,
-        margin: "0 auto",
-      }}
-    >
-      <h1>Werkkledij Wilms (Admin)</h1>
+    <div style={{ padding: 20 }}>
+      <h1>Stock + Bestellingen</h1>
 
-      {errorMessage ? (
-        <div
-          style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: 12,
-            borderRadius: 8,
-            marginBottom: 20,
-          }}
-        >
-          {errorMessage}
-        </div>
-      ) : null}
+      {error && <div style={{ color: "red" }}>{error}</div>}
 
-      <div
-        style={{
-          display: "grid",
-          gap: 16,
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          marginBottom: 24,
-        }}
+      <h2>Nieuwe bestelling</h2>
+
+      <select
+        value={selectedEmployeeId}
+        onChange={(e) => setSelectedEmployeeId(e.target.value)}
       >
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Actieve werknemers</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.activeEmployees}</div>
+        <option value="">Kies werknemer</option>
+        {employees.map((e) => (
+          <option key={e.id} value={e.id}>
+            {e.full_name}
+          </option>
+        ))}
+      </select>
+
+      <br />
+
+      <select
+        value={selectedStockId}
+        onChange={(e) => setSelectedStockId(e.target.value)}
+      >
+        <option value="">Kies artikel</option>
+        {activeStock.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.item_name} ({s.size}) - {s.quantity}
+          </option>
+        ))}
+      </select>
+
+      <input
+        type="number"
+        value={qty}
+        onChange={(e) => setQty(Number(e.target.value))}
+      />
+
+      <button onClick={addToCart}>Toevoegen</button>
+
+      <h3>Mandje</h3>
+      {orderCart.map((l, i) => (
+        <div key={i}>
+          {l.item_name} - {l.size} x {l.qty}
         </div>
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Totaal budget</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalBudget}</div>
-        </div>
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Verbruikt</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalSpent}</div>
-        </div>
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Resterend</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalRemaining}</div>
-        </div>
-        <div style={blockStyle()}>
-          <div style={{ fontSize: 13, color: "#64748b" }}>Bestellingen</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{dashboardStats.totalOrders}</div>
-        </div>
-      </div>
+      ))}
 
-      <div style={blockStyle()}>
-        {sectionHeader("Nieuwe werknemer", showNewEmployee, setShowNewEmployee)}
-        {showNewEmployee ? (
-          <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
-            <div>
-              <label>Voornaam</label>
-              <input
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                style={inputStyle()}
-              />
-            </div>
+      <button onClick={createOrder}>Opslaan</button>
 
-            <div>
-              <label>Achternaam</label>
-              <input
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                style={inputStyle()}
-              />
-            </div>
+      <h2>Voorraad</h2>
+      <button onClick={exportStock}>Export CSV</button>
 
-            <div>
-              <label>Statuut</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                style={inputStyle()}
-              >
-                <option value="Arbeider">Arbeider</option>
-                <option value="Bediende">Bediende</option>
-              </select>
-            </div>
-
-            <div>
-              <button onClick={onAddEmployee} disabled={savingEmployee}>
-                {savingEmployee ? "Opslaan..." : "Werknemer toevoegen"}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      <div style={blockStyle()}>
-        {sectionHeader("Nieuwe bestelling", showNewOrder, setShowNewOrder)}
-        {showNewOrder ? (
-          <>
-            <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-              <div>
-                <label>Werknemer</label>
-                <select
-                  value={selectedEmployeeId}
-                  onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                  style={inputStyle()}
-                >
-                  <option value="">Kies werknemer</option>
-                  {employeesWithStats
-                    .filter((employee) => employee.active)
-                    .map((employee) => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.full_name} ({employee.remaining} pt)
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div>
-                <label>Artikel</label>
-                <select
-                  value={selectedItemId}
-                  onChange={(e) => setSelectedItemId(e.target.value)}
-                  style={inputStyle()}
-                >
-                  <option value="">Kies artikel</option>
-                  {activeCatalogItems.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} ({item.points} pt)
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label>Aantal</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={qty}
-                  onChange={(e) => setQty(Number(e.target.value))}
-                  style={inputStyle()}
-                />
-              </div>
-
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={onAddLineToCart}>
-                  Artikel toevoegen aan bestelling
-                </button>
-                <button
-                  onClick={onCreateOrder}
-                  disabled={
-                    savingOrder || !selectedEmployeeId || orderCart.length === 0
-                  }
-                >
-                  {savingOrder ? "Opslaan..." : "Volledige bestelling opslaan"}
-                </button>
-              </div>
-            </div>
-
-            {selectedOrderEmployee ? (
-              <div
-                style={{
-                  marginTop: 16,
-                  padding: 12,
-                  borderRadius: 8,
-                  background: projectedRemaining !== null && projectedRemaining < 0
-                    ? "#fee2e2"
-                    : "#eff6ff",
-                  color:
-                    projectedRemaining !== null && projectedRemaining < 0
-                      ? "#991b1b"
-                      : "#1d4ed8",
-                }}
-              >
-                <div>
-                  <strong>Huidig saldo:</strong> {selectedOrderEmployee.remaining} pt
-                </div>
-                <div>
-                  <strong>Bestelling in mandje:</strong> {currentOrderTotal} pt
-                </div>
-                <div>
-                  <strong>Saldo na bestelling:</strong>{" "}
-                  {projectedRemaining !== null ? projectedRemaining : "-"} pt
-                </div>
-                {projectedRemaining !== null && projectedRemaining < 0 ? (
-                  <div style={{ marginTop: 8, fontWeight: 700 }}>
-                    Waarschuwing: deze bestelling gaat boven het beschikbare saldo.
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div style={{ marginTop: 20 }}>
-              <h3>Bestellijnen</h3>
-              {orderCart.length === 0 ? (
-                <div>Nog geen artikels toegevoegd.</div>
-              ) : (
-                <div>
-                  {orderCart.map((line) => (
-                    <div
-                      key={line.tempId}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        borderBottom: "1px solid #eee",
-                        padding: "8px 0",
-                        gap: 12,
-                      }}
-                    >
-                      <div>
-                        {line.item_name} - {line.qty} x {line.points_per_unit} pt ={" "}
-                        {line.qty * line.points_per_unit} pt
-                      </div>
-                      <button onClick={() => onRemoveLineFromCart(line.tempId)}>
-                        Verwijderen
-                      </button>
-                    </div>
-                  ))}
-                  <div style={{ marginTop: 12, fontWeight: 700 }}>
-                    Totaal: {currentOrderTotal} pt
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
-        ) : null}
-      </div>
-
-      <div style={blockStyle()}>
-        {sectionHeader("Nieuw artikel", showNewItem, setShowNewItem)}
-        {showNewItem ? (
-          <div style={{ display: "grid", gap: 12, maxWidth: 420 }}>
-            <div>
-              <label>Artikelnaam</label>
-              <input
-                value={newItemName}
-                onChange={(e) => setNewItemName(e.target.value)}
-                style={inputStyle()}
-              />
-            </div>
-
-            <div>
-              <label>Punten</label>
-              <input
-                type="number"
-                value={newItemPoints}
-                onChange={(e) => setNewItemPoints(e.target.value)}
-                style={inputStyle()}
-              />
-            </div>
-
-            <div>
-              <button onClick={onAddCatalogItem} disabled={savingItem}>
-                {savingItem ? "Opslaan..." : "Artikel toevoegen"}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      <div style={blockStyle()}>
-        {sectionHeader("Zoek en filter werknemers", showSearchFilter, setShowSearchFilter)}
-        {showSearchFilter ? (
-          <div
-            style={{
-              display: "grid",
-              gap: 12,
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            }}
-          >
-            <div>
-              <label>Zoek op naam</label>
-              <input
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="bv. Meeus of Janssens"
-                style={inputStyle()}
-              />
-            </div>
-
-            <div>
-              <label>Filter op statuut</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                style={inputStyle()}
-              >
-                <option value="all">Alle statuten</option>
-                <option value="Arbeider">Arbeider</option>
-                <option value="Bediende">Bediende</option>
-              </select>
-            </div>
-
-            <div>
-              <label>Filter op status</label>
-              <select
-                value={activeFilter}
-                onChange={(e) => setActiveFilter(e.target.value)}
-                style={inputStyle()}
-              >
-                <option value="active">Alleen actief</option>
-                <option value="inactive">Alleen inactief</option>
-                <option value="all">Alles</option>
-              </select>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      <div style={blockStyle()}>
-        {sectionHeader(
-          "Werknemers",
-          showEmployees,
-          setShowEmployees,
-          <span>{filteredEmployees.length} gevonden</span>
-        )}
-        {showEmployees ? (
-          <>
-            {loadingEmployees ? <div>Werknemers laden...</div> : null}
-
-            {filteredEmployees.map((employee) => (
-              <div
-                key={employee.id}
-                style={{
-                  padding: 12,
-                  borderBottom: "1px solid #eee",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <strong>{employee.full_name}</strong> ({employee.status}) - budget{" "}
-                  {employee.budget} / verbruikt {employee.spent} / saldo{" "}
-                  {employee.remaining}
-                  {!employee.active && <span> - inactief</span>}
-                </div>
-
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setDetailEmployeeId(employee.id)}>
-                    Detail
-                  </button>
-                  {employee.active ? (
-                    <button onClick={() => onDeactivateEmployee(employee.id)}>
-                      Inactief zetten
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </>
-        ) : null}
-      </div>
-
-      {selectedEmployee ? (
-        <div style={blockStyle()}>
-          <h2 style={{ marginTop: 0 }}>
-            Werknemerdetail: {selectedEmployee.full_name}
-          </h2>
-
-          <div
-            style={{
-              display: "grid",
-              gap: 16,
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              marginBottom: 20,
-            }}
-          >
-            <div>
-              <strong>Statuut:</strong> {selectedEmployee.status}
-            </div>
-            <div>
-              <strong>Budget:</strong> {selectedEmployee.budget}
-            </div>
-            <div>
-              <strong>Historisch verbruikt:</strong>{" "}
-              {selectedEmployee.opening_spent || 0}
-            </div>
-            <div>
-              <strong>Totaal verbruikt:</strong> {selectedEmployee.spent}
-            </div>
-            <div>
-              <strong>Saldo:</strong> {selectedEmployee.remaining}
-            </div>
-          </div>
-
-          <div style={{ maxWidth: 320, marginBottom: 20 }}>
-            <label>Extra punten toevoegen</label>
-            <input
-              type="number"
-              value={extraPointsInput}
-              onChange={(e) => setExtraPointsInput(e.target.value)}
-              style={inputStyle()}
-            />
-            <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-              <button onClick={onAddExtraPoints} disabled={savingExtraPoints}>
-                {savingExtraPoints ? "Opslaan..." : "Extra punten opslaan"}
-              </button>
-              <button onClick={() => setDetailEmployeeId(null)}>Sluiten</button>
-            </div>
-          </div>
-
-          <h3>Bestellingen</h3>
-          {(ordersByEmployee[selectedEmployee.id] || []).length === 0 ? (
-            <div>Geen nieuwe bestellingen voor deze werknemer.</div>
-          ) : (
-            (ordersByEmployee[selectedEmployee.id] || []).map((order) => (
-              <div
-                key={order.id}
-                style={{
-                  borderTop: "1px solid #eee",
-                  paddingTop: 10,
-                  marginTop: 10,
-                  opacity: order.status === "Geannuleerd" ? 0.6 : 1,
-                }}
-              >
-                <div style={{ marginBottom: 6 }}>
-                  <strong>Datum:</strong> {order.order_date}
-                </div>
-                <div style={{ marginBottom: 6 }}>
-                  <strong>Status:</strong>{" "}
-                  <span style={statusStyle(order.status)}>{order.status}</span>
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    marginBottom: 10,
-                  }}
-                >
-                  {ORDER_STATUSES.map((nextStatus) => (
-                    <button
-                      key={nextStatus}
-                      onClick={() =>
-                        onUpdateOrderStatus(
-                          order.id,
-                          selectedEmployee.id,
-                          nextStatus
-                        )
-                      }
-                      disabled={order.status === nextStatus}
-                    >
-                      {nextStatus}
-                    </button>
-                  ))}
-                </div>
-
-                <ul>
-                  {(order.lines || []).map((line) => (
-                    <li key={line.id}>
-                      {getItemName(line.item_id)} - {line.qty} x{" "}
-                      {line.points_per_unit} pt
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))
+      {stockItems.map((s) => (
+        <div key={s.id}>
+          {s.item_name} - {s.size} ({s.quantity})
+          {s.quantity <= s.minimum_quantity && (
+            <span style={{ color: "orange" }}> ⚠ laag</span>
           )}
+          <button onClick={() => toggleStock(s)}>
+            {s.active ? "Deactiveren" : "Activeren"}
+          </button>
         </div>
-      ) : null}
-
-      <div style={blockStyle()}>
-        {sectionHeader("Catalogus", showCatalog, setShowCatalog)}
-        {showCatalog ? (
-          <>
-            {loadingCatalog ? <div>Catalogus laden...</div> : null}
-            {catalogItems.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  padding: "8px 0",
-                  borderBottom: "1px solid #eee",
-                  alignItems: "center",
-                }}
-              >
-                <div>
-                  {item.name} ({item.points} pt){!item.active ? " - inactief" : ""}
-                </div>
-                <button onClick={() => onToggleCatalogItem(item)}>
-                  {item.active ? "Inactief zetten" : "Activeren"}
-                </button>
-              </div>
-            ))}
-          </>
-        ) : null}
-      </div>
-
-      <div style={blockStyle()}>
-        {sectionHeader("Bestellingen per werknemer", showOrdersOverview, setShowOrdersOverview)}
-        {showOrdersOverview ? (
-          <>
-            {loadingOrders ? <div>Bestellingen laden...</div> : null}
-
-            {employeesWithStats.map((employee) => {
-              const employeeOrders = ordersByEmployee[employee.id] || [];
-              if (employeeOrders.length === 0) return null;
-
-              return (
-                <div
-                  key={employee.id}
-                  style={{
-                    border: "1px solid #eee",
-                    borderRadius: 8,
-                    padding: 12,
-                    marginBottom: 12,
-                    background: "#fff",
-                  }}
-                >
-                  <h3 style={{ marginTop: 0 }}>{employee.full_name}</h3>
-
-                  {employeeOrders.map((order) => (
-                    <div
-                      key={order.id}
-                      style={{
-                        borderTop: "1px solid #eee",
-                        paddingTop: 10,
-                        marginTop: 10,
-                        opacity: order.status === "Geannuleerd" ? 0.6 : 1,
-                      }}
-                    >
-                      <div style={{ marginBottom: 6 }}>
-                        <strong>Datum:</strong> {order.order_date}
-                      </div>
-                      <div style={{ marginBottom: 6 }}>
-                        <strong>Status:</strong>{" "}
-                        <span style={statusStyle(order.status)}>{order.status}</span>
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          flexWrap: "wrap",
-                          marginBottom: 10,
-                        }}
-                      >
-                        {ORDER_STATUSES.map((nextStatus) => (
-                          <button
-                            key={nextStatus}
-                            onClick={() =>
-                              onUpdateOrderStatus(order.id, employee.id, nextStatus)
-                            }
-                            disabled={order.status === nextStatus}
-                          >
-                            {nextStatus}
-                          </button>
-                        ))}
-                      </div>
-
-                      <ul>
-                        {(order.lines || []).map((line) => (
-                          <li key={line.id}>
-                            {getItemName(line.item_id)} - {line.qty} x{" "}
-                            {line.points_per_unit} pt
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </>
-        ) : null}
-      </div>
+      ))}
     </div>
   );
 }
